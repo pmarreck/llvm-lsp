@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+source "$HOME/dotfiles/bin/src/capture.bash"
+
+fail=0
+
+assert_eq() {
+	local actual="$1"
+	local expected="$2"
+	local message="$3"
+	if [[ "$actual" != "$expected" ]]; then
+		echo "FAIL: $message" >&2
+		echo "  expected: [$expected]" >&2
+		echo "  actual:   [$actual]" >&2
+		fail=1
+	fi
+}
+
+assert_contains() {
+	local haystack="$1"
+	local needle="$2"
+	local message="$3"
+	if [[ "$haystack" != *"$needle"* ]]; then
+		echo "FAIL: $message" >&2
+		echo "  missing: [$needle]" >&2
+		echo "  actual:  [$haystack]" >&2
+		fail=1
+	fi
+}
+
+run_assist_flow_test() {
+	local out err rc
+	capture bash -c '
+		./build >/dev/null
+		uri="file:///tmp/assist.ll"
+		source="%struct.Foo = type { i32 }\n@glob = global i32 0\n!0 = !{i32 1}\ndefine i32 @main() {\nentry:\n  %x = alloca i32\n  %op = \n  %ty = add \n  call i32 @main()\n  ret i32 0, !dbg !0\n}\n"
+		m1="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"
+		m2="{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\",\"text\":\"${source}\"}}}"
+		m3="{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":3,\"character\":11}}}"
+		m4="{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":8,\"character\":12}}}"
+		m5="{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":5,\"character\":3}}}"
+		m6="{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":9,\"character\":19}}}"
+		m7="{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":6,\"character\":8}}}"
+		m8="{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":7,\"character\":12}}}"
+		s="{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"shutdown\",\"params\":null}"
+		e="{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":null}"
+		{
+			for msg in "$m1" "$m2" "$m3" "$m4" "$m5" "$m6" "$m7" "$m8" "$s" "$e"; do
+				printf "Content-Length: %s\r\n\r\n%s" "${#msg}" "$msg"
+			done
+		} | ./zig-out/bin/llvm-lsp
+	'
+
+	assert_eq "$rc" "0" "assist flow should exit cleanly"
+	assert_contains "$out" '"id":5' "hover response should be present"
+	assert_contains "$out" '"contents"' "hover response should include contents"
+	assert_contains "$out" '@main' "hover content should mention function"
+	assert_contains "$out" '"id":6' "completion response should be present"
+	assert_contains "$out" '"label":"@main"' "completion should include @main"
+	assert_contains "$out" '"label":"@glob"' "completion should include @glob"
+	assert_contains "$out" '"id":7' "percent completion response should be present"
+	assert_contains "$out" '"label":"%x"' "percent completion should include local"
+	assert_contains "$out" '"label":"%struct.Foo"' "percent completion should include type alias"
+	assert_contains "$out" '"id":8' "metadata completion response should be present"
+	assert_contains "$out" '"label":"!0"' "metadata completion should include metadata id"
+	assert_contains "$out" '"id":10' "opcode completion response should be present"
+	assert_contains "$out" '"label":"alloca"' "opcode completion should include alloca"
+	assert_contains "$out" '"label":"add"' "opcode completion should include add"
+	assert_contains "$out" '"id":11' "type completion response should be present"
+	assert_contains "$out" '"label":"i32"' "type completion should include i32"
+	assert_contains "$out" '"label":"ptr"' "type completion should include ptr"
+}
+
+run_assist_flow_test
+
+if (( fail != 0 )); then
+	exit 1
+fi

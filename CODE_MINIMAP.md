@@ -24,8 +24,10 @@
 - Unit test step now runs `src/tests.zig` so parser/core tests are part of `./test`.
 
 `src/main.zig`
-- M0 server implementation.
-- Handles stdin/stdout LSP framing, `initialize`, `shutdown`, `exit`, EOF behavior, and debug build banner emission.
+- LSP server runtime and transport implementation.
+- Handles framing/lifecycle (`initialize`, `initialized`, `shutdown`, `exit`), plus `didOpen`/`didChange`/`didClose`.
+- Implements `definition`, `references`, `documentSymbol`, `hover`, and `completion` request handlers.
+- Publishes diagnostics notifications for undefined local symbols and missing terminators after open/change; clears diagnostics on close.
 - Emits framed JSON-RPC errors for malformed JSON (`-32700`) and invalid request framing (`-32600`), including oversized content-length rejection.
 
 `src/tests.zig`
@@ -43,7 +45,8 @@
 - Collects top-level parameter-signature references from both `declare` and `define` lines.
 - Tracks multiline metadata blocks (e.g., `distinct !{ ... }`) to collect continuation-line references.
 - Supports quoted `%/@/!` identifiers including escaped quotes within quoted names.
-- Contains unit tests validating extraction, `%0` scope isolation across functions, RHS local reference counting, top-level/metadata reference extraction, escaped quoted identifier handling, and signature-level type alias references.
+- Supports `#` attribute-group reference capture and branch-label reference capture (`label %foo` => `foo`).
+- Contains unit tests validating extraction, `%0` scope isolation across functions, RHS local reference counting, top-level/metadata reference extraction, escaped quoted identifier handling, signature-level type alias references, multiline global constants, and label references.
 
 `tests/cli/m0_lifecycle`
 - CLI integration test covering M0 lifecycle behavior.
@@ -52,6 +55,22 @@
 `tests/cli/m0_transport_hardening`
 - CLI integration test for malformed/partial/oversized request handling.
 - Asserts parse-error and invalid-request error codes, no-hang behavior on partial headers, and non-zero exits for framing failures.
+
+`tests/cli/lsp_navigation`
+- Integration test for document open + navigation flow.
+- Verifies `definition`, `references`, and `documentSymbol` responses in a single LSP session.
+
+`tests/cli/lsp_assist`
+- Integration test for assistive features.
+- Verifies `hover` plus completion contexts for `@`, `%`, `!`, opcode suggestions (`= `), and type suggestions (opcode + space).
+
+`tests/cli/lsp_diagnostics`
+- Integration test for diagnostics notifications.
+- Verifies undefined-symbol and missing-terminator diagnostics are published with error severity.
+
+`tests/cli/lsp_document_lifecycle`
+- Integration test for document synchronization semantics.
+- Verifies `didChange` reparses content and `didClose` invalidates lookup results.
 
 `flake.nix`
 - Nix flake defining project development shell and default package build.

@@ -6,7 +6,7 @@ pub fn parseModule(allocator: std.mem.Allocator, source: []const u8) !symbols.In
 	errdefer index.deinit();
 
 	var current_function: ?[]const u8 = null;
-	var metadata_block_depth: usize = 0;
+	var top_level_rhs_depth: usize = 0;
 	var line_no: usize = 0;
 	var lines = std.mem.splitScalar(u8, source, '\n');
 	while (lines.next()) |raw_line| {
@@ -14,9 +14,9 @@ pub fn parseModule(allocator: std.mem.Allocator, source: []const u8) !symbols.In
 		const trimmed = trimSourceLine(raw_line);
 		if (trimmed.len == 0) continue;
 
-		if (current_function == null and metadata_block_depth > 0) {
+		if (current_function == null and top_level_rhs_depth > 0) {
 			try collectReferences(&index, trimmed, line_no, null);
-			metadata_block_depth = advanceBraceDepth(metadata_block_depth, trimmed);
+			top_level_rhs_depth = advanceCompositeDepth(top_level_rhs_depth, trimmed);
 			continue;
 		}
 
@@ -27,6 +27,7 @@ pub fn parseModule(allocator: std.mem.Allocator, source: []const u8) !symbols.In
 				if (std.mem.indexOfScalar(u8, trimmed, '=')) |eq_pos| {
 					const rhs = trimmed[eq_pos + 1 ..];
 					try collectReferences(&index, rhs, line_no, null);
+					top_level_rhs_depth = advanceCompositeDepth(0, rhs);
 				}
 				continue;
 			}
@@ -37,6 +38,7 @@ pub fn parseModule(allocator: std.mem.Allocator, source: []const u8) !symbols.In
 				if (std.mem.indexOfScalar(u8, trimmed, '=')) |eq_pos| {
 					const rhs = trimmed[eq_pos + 1 ..];
 					try collectReferences(&index, rhs, line_no, null);
+					top_level_rhs_depth = advanceCompositeDepth(0, rhs);
 				}
 				continue;
 			}
@@ -45,6 +47,7 @@ pub fn parseModule(allocator: std.mem.Allocator, source: []const u8) !symbols.In
 				const fn_name = parseNameAfterPrefix(trimmed, '@') orelse continue;
 				try index.addSymbol(.function_decl, fn_name, line_no, null);
 				try collectSignatureParamReferences(&index, trimmed, line_no);
+				try collectTrailingAttributeGroupReferences(&index, trimmed, line_no);
 				continue;
 			}
 
@@ -53,6 +56,7 @@ pub fn parseModule(allocator: std.mem.Allocator, source: []const u8) !symbols.In
 				try index.addSymbol(.function_def, fn_name, line_no, null);
 				try parseParamDefinitions(&index, trimmed, line_no, fn_name);
 				try collectSignatureParamReferences(&index, trimmed, line_no);
+				try collectTrailingAttributeGroupReferences(&index, trimmed, line_no);
 				current_function = fn_name;
 				continue;
 			}
@@ -63,7 +67,7 @@ pub fn parseModule(allocator: std.mem.Allocator, source: []const u8) !symbols.In
 				if (std.mem.indexOfScalar(u8, trimmed, '=')) |eq_pos| {
 					const rhs = trimmed[eq_pos + 1 ..];
 					try collectReferences(&index, rhs, line_no, null);
-					metadata_block_depth = advanceBraceDepth(0, rhs);
+					top_level_rhs_depth = advanceCompositeDepth(0, rhs);
 				}
 				continue;
 			}
@@ -88,15 +92,17 @@ pub fn parseModule(allocator: std.mem.Allocator, source: []const u8) !symbols.In
 			if (std.mem.indexOfScalar(u8, trimmed, '=')) |eq_pos| {
 				const lhs = std.mem.trim(u8, trimmed[0..eq_pos], " \t");
 				const def_token = parseTokenAt(lhs, 0) orelse continue;
-				try index.addSymbol(.local, def_token.token, line_no, current_function);
-				const rhs = trimmed[eq_pos + 1 ..];
-				try collectReferences(&index, rhs, line_no, current_function);
-				continue;
+					try index.addSymbol(.local, def_token.token, line_no, current_function);
+					const rhs = trimmed[eq_pos + 1 ..];
+					try collectReferences(&index, rhs, line_no, current_function);
+					try collectLabelReferences(&index, rhs, line_no, current_function);
+					continue;
+				}
 			}
-		}
 
-		try collectReferences(&index, trimmed, line_no, current_function);
-	}
+			try collectReferences(&index, trimmed, line_no, current_function);
+			try collectLabelReferences(&index, trimmed, line_no, current_function);
+		}
 
 	return index;
 }
@@ -123,10 +129,10 @@ fn parseNameAfterPrefix(line: []const u8, prefix: u8) ?[]const u8 {
 fn parseTokenAt(line: []const u8, start: usize) ?ParsedToken {
 	if (start >= line.len) return null;
 	const prefix = line[start];
-	if (prefix != '%' and prefix != '@' and prefix != '!') return null;
+	if (prefix != '%' and prefix != '@' and prefix != '!' and prefix != '#') return null;
 	if (start + 1 >= line.len) return null;
 
-	if (line[start + 1] == '"') {
+	if (line[start + 1] == '"' and prefix != '#') {
 		var i = start + 2;
 		while (i < line.len) {
 			if (line[i] == '\\') {
@@ -187,12 +193,25 @@ fn collectSignatureParamReferences(index: *symbols.Index, line: []const u8, line
 	try collectReferences(index, params, line_no, null);
 }
 
-fn advanceBraceDepth(depth: usize, text: []const u8) usize {
+fn collectTrailingAttributeGroupReferences(index: *symbols.Index, line: []const u8, line_no: usize) !void {
+	const close = std.mem.lastIndexOfScalar(u8, line, ')') orelse return;
+	if (close + 1 >= line.len) return;
+	const suffix = line[close + 1 ..];
+	try collectHashReferences(index, suffix, line_no, null);
+}
+
+fn advanceCompositeDepth(depth: usize, text: []const u8) usize {
 	var next = depth;
 	for (text) |c| {
 		switch (c) {
-			'{' => next += 1,
+			'{', '[', '(' => next += 1,
 			'}' => {
+				if (next > 0) next -= 1;
+			},
+			']' => {
+				if (next > 0) next -= 1;
+			},
+			')' => {
 				if (next > 0) next -= 1;
 			},
 			else => {},
@@ -205,7 +224,7 @@ fn collectReferences(index: *symbols.Index, line: []const u8, line_no: usize, fu
 	var cursor: usize = 0;
 	while (cursor < line.len) {
 		const c = line[cursor];
-		if (c != '%' and c != '@' and c != '!') {
+		if (c != '%' and c != '@' and c != '!' and c != '#') {
 			cursor += 1;
 			continue;
 		}
@@ -214,6 +233,46 @@ fn collectReferences(index: *symbols.Index, line: []const u8, line_no: usize, fu
 			continue;
 		};
 		try index.addReference(token.token, line_no, function_name);
+		cursor = token.next_index;
+	}
+}
+
+fn collectHashReferences(index: *symbols.Index, line: []const u8, line_no: usize, function_name: ?[]const u8) !void {
+	var cursor: usize = 0;
+	while (cursor < line.len) {
+		if (line[cursor] != '#') {
+			cursor += 1;
+			continue;
+		}
+		const token = parseTokenAt(line, cursor) orelse {
+			cursor += 1;
+			continue;
+		};
+		try index.addReference(token.token, line_no, function_name);
+		cursor = token.next_index;
+	}
+}
+
+fn collectLabelReferences(index: *symbols.Index, line: []const u8, line_no: usize, function_name: ?[]const u8) !void {
+	var cursor: usize = 0;
+	while (cursor < line.len) {
+		const label_pos_opt = std.mem.indexOfPos(u8, line, cursor, "label");
+		if (label_pos_opt == null) break;
+		const label_pos = label_pos_opt.?;
+		var i = label_pos + "label".len;
+		while (i < line.len and (line[i] == ' ' or line[i] == '\t')) : (i += 1) {}
+		if (i >= line.len or line[i] != '%') {
+			cursor = label_pos + 1;
+			continue;
+		}
+
+		const token = parseTokenAt(line, i) orelse {
+			cursor = label_pos + 1;
+			continue;
+		};
+		if (token.token.len > 1) {
+			try index.addReference(token.token[1..], line_no, function_name);
+		}
 		cursor = token.next_index;
 	}
 }
@@ -352,4 +411,56 @@ test "parser collects references from multiline distinct metadata" {
 	try std.testing.expect(index.hasDefinition(.metadata, "!0", null, 1));
 	try std.testing.expect(index.hasDefinition(.metadata, "!1", null, 2));
 	try std.testing.expectEqual(@as(usize, 1), index.countReferences("!0", null));
+}
+
+test "parser collects attribute-group references on declare and define" {
+	const source =
+		"attributes #0 = { nounwind }\n" ++
+		"declare fastcc void @consume(ptr nocapture %p) #0\n" ++
+		"define fastcc void @run(ptr noalias %q) #0 {\n" ++
+		"entry:\n" ++
+		"  ret void\n" ++
+		"}\n";
+
+	var index = try parseModule(std.testing.allocator, source);
+	defer index.deinit();
+
+	try std.testing.expectEqual(@as(usize, 2), index.countReferences("#0", null));
+}
+
+test "parser collects references from multiline global constants" {
+	const source =
+		"@a = global i32 1\n" ++
+		"@b = global i32 2\n" ++
+		"@table = global [2 x ptr] [\n" ++
+		"  ptr @a,\n" ++
+		"  ptr @b\n" ++
+		"]\n";
+
+	var index = try parseModule(std.testing.allocator, source);
+	defer index.deinit();
+
+	try std.testing.expectEqual(@as(usize, 1), index.countReferences("@a", null));
+	try std.testing.expectEqual(@as(usize, 1), index.countReferences("@b", null));
+}
+
+test "parser collects branch label references as labels" {
+	const source =
+		"define void @f(i1 %cond) {\n" ++
+		"entry:\n" ++
+		"  br i1 %cond, label %then, label %else\n" ++
+		"then:\n" ++
+		"  br label %exit\n" ++
+		"else:\n" ++
+		"  br label %exit\n" ++
+		"exit:\n" ++
+		"  ret void\n" ++
+		"}\n";
+
+	var index = try parseModule(std.testing.allocator, source);
+	defer index.deinit();
+
+	try std.testing.expectEqual(@as(usize, 1), index.countReferences("then", "@f"));
+	try std.testing.expectEqual(@as(usize, 1), index.countReferences("else", "@f"));
+	try std.testing.expectEqual(@as(usize, 2), index.countReferences("exit", "@f"));
 }

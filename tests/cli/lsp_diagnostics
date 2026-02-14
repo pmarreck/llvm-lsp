@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+source "$HOME/dotfiles/bin/src/capture.bash"
+
+fail=0
+
+assert_eq() {
+	local actual="$1"
+	local expected="$2"
+	local message="$3"
+	if [[ "$actual" != "$expected" ]]; then
+		echo "FAIL: $message" >&2
+		echo "  expected: [$expected]" >&2
+		echo "  actual:   [$actual]" >&2
+		fail=1
+	fi
+}
+
+assert_contains() {
+	local haystack="$1"
+	local needle="$2"
+	local message="$3"
+	if [[ "$haystack" != *"$needle"* ]]; then
+		echo "FAIL: $message" >&2
+		echo "  missing: [$needle]" >&2
+		echo "  actual:  [$haystack]" >&2
+		fail=1
+	fi
+}
+
+run_diagnostics_test() {
+	local out err rc
+	capture bash -c '
+		./build >/dev/null
+		uri="file:///tmp/diag.ll"
+		source="define void @f() {\nentry:\n  store i32 1, ptr %undef\n  ret void\n}\n"
+		m1="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"
+		m2="{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\",\"text\":\"${source}\"}}}"
+		s="{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"shutdown\",\"params\":null}"
+		e="{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":null}"
+		{
+			for msg in "$m1" "$m2" "$s" "$e"; do
+				printf "Content-Length: %s\r\n\r\n%s" "${#msg}" "$msg"
+			done
+		} | ./zig-out/bin/llvm-lsp
+	'
+
+	assert_eq "$rc" "0" "diagnostics flow should exit cleanly"
+	assert_contains "$out" '"method":"textDocument/publishDiagnostics"' "publishDiagnostics notification should be emitted"
+	assert_contains "$out" '%undef' "diagnostic message should mention undefined symbol"
+	assert_contains "$out" '"severity":1' "undefined symbol should be error severity"
+}
+
+run_missing_terminator_test() {
+	local out err rc
+	capture bash -c '
+		./build >/dev/null
+		uri="file:///tmp/diag-missing-term.ll"
+		source="define void @f() {\nentry:\n  %x = alloca i32\n}\n"
+		m1="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"
+		m2="{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\",\"text\":\"${source}\"}}}"
+		s="{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"shutdown\",\"params\":null}"
+		e="{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":null}"
+		{
+			for msg in "$m1" "$m2" "$s" "$e"; do
+				printf "Content-Length: %s\r\n\r\n%s" "${#msg}" "$msg"
+			done
+		} | ./zig-out/bin/llvm-lsp
+	'
+
+	assert_eq "$rc" "0" "missing terminator flow should exit cleanly"
+	assert_contains "$out" '"method":"textDocument/publishDiagnostics"' "publishDiagnostics should be emitted"
+	assert_contains "$out" 'missing terminator' "diagnostic should report missing terminator"
+	assert_contains "$out" '"severity":1' "missing terminator should be error severity"
+}
+
+run_diagnostics_test
+run_missing_terminator_test
+
+if (( fail != 0 )); then
+	exit 1
+fi

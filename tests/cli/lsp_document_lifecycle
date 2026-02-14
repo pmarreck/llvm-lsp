@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+source "$HOME/dotfiles/bin/src/capture.bash"
+
+fail=0
+
+assert_eq() {
+	local actual="$1"
+	local expected="$2"
+	local message="$3"
+	if [[ "$actual" != "$expected" ]]; then
+		echo "FAIL: $message" >&2
+		echo "  expected: [$expected]" >&2
+		echo "  actual:   [$actual]" >&2
+		fail=1
+	fi
+}
+
+assert_contains() {
+	local haystack="$1"
+	local needle="$2"
+	local message="$3"
+	if [[ "$haystack" != *"$needle"* ]]; then
+		echo "FAIL: $message" >&2
+		echo "  missing: [$needle]" >&2
+		echo "  actual:  [$haystack]" >&2
+		fail=1
+	fi
+}
+
+run_document_lifecycle_test() {
+	local out err rc
+	capture bash -c '
+		./build >/dev/null
+		uri="file:///tmp/lifecycle.ll"
+		src1="define void @f() {\nentry:\n  %x = alloca i32\n  store i32 1, ptr %x\n  ret void\n}\n"
+		src2="define void @f() {\nentry:\n  %tmp = add i32 0, 0\n  %y = alloca i32\n  store i32 1, ptr %y\n  ret void\n}\n"
+		m1="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"
+		m2="{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\",\"text\":\"${src1}\"}}}"
+		m3="{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":3,\"character\":20}}}"
+		m4="{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"contentChanges\":[{\"text\":\"${src2}\"}]}}"
+		m5="{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/references\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":3,\"character\":2},\"context\":{\"includeDeclaration\":true}}}"
+		m6="{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didClose\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"}}}"
+		m7="{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":3,\"character\":20}}}"
+		s="{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"shutdown\",\"params\":null}"
+		e="{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":null}"
+		{
+			for msg in "$m1" "$m2" "$m3" "$m4" "$m5" "$m6" "$m7" "$s" "$e"; do
+				printf "Content-Length: %s\r\n\r\n%s" "${#msg}" "$msg"
+			done
+		} | ./zig-out/bin/llvm-lsp
+	'
+
+	assert_eq "$rc" "0" "document lifecycle flow should exit cleanly"
+	assert_contains "$out" '"id":2' "initial definition response should be present"
+	assert_contains "$out" '"id":3' "references response after didChange should be present"
+	assert_contains "$out" '"line":3' "references after didChange should include shifted definition line"
+	assert_contains "$out" '"line":4' "references after didChange should include shifted use line"
+	assert_contains "$out" '"id":4,"result":null' "definition after didClose should return null"
+	assert_contains "$out" '"method":"textDocument/publishDiagnostics"' "diagnostics notification should be emitted during lifecycle"
+}
+
+run_document_lifecycle_test
+
+if (( fail != 0 )); then
+	exit 1
+fi

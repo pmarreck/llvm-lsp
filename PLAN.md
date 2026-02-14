@@ -24,8 +24,15 @@
 - [x] Update `CODE_MINIMAP.md` for new parser behaviors/tests. (completed 2026-02-14 15:32 EST)
 - [ ] Add failing tests for attributes/calling conventions/complex constants and extend parser accordingly.
 - [x] Add failing tests for metadata edge forms (`distinct`, nested tuples, named metadata refs) and extend parser accordingly. (completed 2026-02-14 15:35 EST; multiline `distinct` references covered)
-- [ ] Add failing tests for instruction-level reference extraction beyond `%/@/!` token scanning (labels, inline asm edge cases).
+- [x] Add failing tests for instruction-level reference extraction beyond `%/@/!` token scanning (labels, inline asm edge cases). (completed 2026-02-14 16:05 EST; branch label references covered)
 - [x] Add failing test for type-alias references in `declare`/`define` signatures and implement support. (completed 2026-02-14 15:33 EST)
+- [x] Add end-to-end LSP navigation tests (`didOpen`, `definition`, `references`, `documentSymbol`) and implement handlers. (completed 2026-02-14 16:38 EST)
+- [x] Add end-to-end assist tests (`hover`, completion for `@/%/!`, opcode/type context completions) and implement handlers. (completed 2026-02-14 16:58 EST)
+- [x] Add diagnostics integration tests and implement `publishDiagnostics` for undefined locals and missing terminators. (completed 2026-02-14 16:53 EST)
+- [x] Add document lifecycle integration test for `didChange` reparse and `didClose` invalidation semantics. (completed 2026-02-14 16:46 EST)
+- [ ] Add failing tests for parser duplicate-symbol diagnostics and implement duplicate-definition reporting.
+- [ ] Add failing tests for opcode-hover descriptions and implement instruction hover docs.
+- [ ] Add failing tests for completion in `br label %` context and implement label completions by function scope.
 
 ## Curiosity Pokes To Revisit
 - Clarify whether `references` should include declaration by default.

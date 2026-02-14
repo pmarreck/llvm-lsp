@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+source "$HOME/dotfiles/bin/src/capture.bash"
+
+fail=0
+
+assert_eq() {
+	local actual="$1"
+	local expected="$2"
+	local message="$3"
+	if [[ "$actual" != "$expected" ]]; then
+		echo "FAIL: $message" >&2
+		echo "  expected: [$expected]" >&2
+		echo "  actual:   [$actual]" >&2
+		fail=1
+	fi
+}
+
+assert_contains() {
+	local haystack="$1"
+	local needle="$2"
+	local message="$3"
+	if [[ "$haystack" != *"$needle"* ]]; then
+		echo "FAIL: $message" >&2
+		echo "  missing: [$needle]" >&2
+		echo "  actual:  [$haystack]" >&2
+		fail=1
+	fi
+}
+
+run_navigation_flow_test() {
+	local out err rc
+	capture bash -c '
+		./build >/dev/null
+		uri="file:///tmp/nav.ll"
+		source="define i32 @main(i32 %argc) {\nentry:\n  %x = alloca i32\n  store i32 1, ptr %x\n  ret i32 0\n}\n"
+		m1="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"
+		m2="{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\",\"text\":\"${source}\"}}}"
+		m3="{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":3,\"character\":20}}}"
+		m4="{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/references\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":2,\"character\":2},\"context\":{\"includeDeclaration\":true}}}"
+		m5="{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/documentSymbol\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"}}}"
+		s="{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"shutdown\",\"params\":null}"
+		e="{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":null}"
+		{
+			for msg in "$m1" "$m2" "$m3" "$m4" "$m5" "$s" "$e"; do
+				printf "Content-Length: %s\r\n\r\n%s" "${#msg}" "$msg"
+			done
+		} | ./zig-out/bin/llvm-lsp
+	'
+
+	assert_eq "$rc" "0" "navigation flow should exit cleanly after shutdown+exit"
+	assert_contains "$out" '"id":1' "initialize response should be present"
+	assert_contains "$out" '"id":2' "definition response should be present"
+	assert_contains "$out" '"id":3' "references response should be present"
+	assert_contains "$out" '"id":4' "documentSymbol response should be present"
+	assert_contains "$out" '"id":9' "shutdown response should be present"
+	assert_contains "$out" '"line":2' "definition should point to local definition line"
+	assert_contains "$out" '"name":"@main"' "documentSymbol should include function symbol"
+}
+
+run_navigation_flow_test
+
+if (( fail != 0 )); then
+	exit 1
+fi
