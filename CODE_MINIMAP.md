@@ -26,6 +26,7 @@
 `.github/workflows/ci.yml`
 - GitHub Actions CI workflow.
 - Runs on `push` to `yolo` and on `pull_request`; installs Nix then executes `./build` and `./test`.
+- Uses space-indented YAML to satisfy GitHub parser requirements.
 
 `src/main.zig`
 - Thin process entrypoint.
@@ -106,6 +107,7 @@
 `tests/cli/ci_workflow`
 - CI guard test.
 - Verifies workflow presence and that it triggers on `push`/`pull_request` while running `./build` and `./test`.
+- Verifies workflow YAML has no tab indentation.
 
 `tests/cli/lsp_large_file_stress`
 - Large-file integration test.
@@ -114,6 +116,7 @@
 `flake.nix`
 - Nix flake defining project development shell and default package build.
 - Exposes Zig/ZLS toolchain and `zig build -Doptimize=ReleaseFast` package build behavior.
+- Serves as the single source for Garnix autodetected builds (no `garnix.yaml` required).
 
 `flake.lock`
 - Nix input lockfile for reproducible dependency resolution.

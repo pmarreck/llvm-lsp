@@ -28,6 +28,11 @@ assert_contains "$content" "pull_request:" "workflow should run on pull_request"
 assert_contains "$content" "./build" "workflow should run ./build"
 assert_contains "$content" "./test" "workflow should run ./test"
 
+if LC_ALL=C grep -n $'\t' "$workflow_path" >/dev/null; then
+	echo "FAIL: workflow YAML must not contain tab indentation" >&2
+	fail=1
+fi
+
 if (( fail != 0 )); then
 	exit 1
 fi
