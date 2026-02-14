@@ -78,6 +78,10 @@
 - Integration test for opcode hover and branch-label completion.
 - Verifies hover description for `ret` and completion labels in `br label %` context.
 
+`tests/cli/lsp_errors`
+- Integration test for JSON-RPC error handling paths.
+- Verifies `-32601` for unknown methods and `-32600` for malformed requests missing `method`.
+
 `flake.nix`
 - Nix flake defining project development shell and default package build.
 - Exposes Zig/ZLS toolchain and `zig build -Doptimize=ReleaseFast` package build behavior.

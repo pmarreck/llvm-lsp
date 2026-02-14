@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+source "$HOME/dotfiles/bin/src/capture.bash"
+
+fail=0
+
+assert_eq() {
+	local actual="$1"
+	local expected="$2"
+	local message="$3"
+	if [[ "$actual" != "$expected" ]]; then
+		echo "FAIL: $message" >&2
+		echo "  expected: [$expected]" >&2
+		echo "  actual:   [$actual]" >&2
+		fail=1
+	fi
+}
+
+assert_contains() {
+	local haystack="$1"
+	local needle="$2"
+	local message="$3"
+	if [[ "$haystack" != *"$needle"* ]]; then
+		echo "FAIL: $message" >&2
+		echo "  missing: [$needle]" >&2
+		echo "  actual:  [$haystack]" >&2
+		fail=1
+	fi
+}
+
+run_error_paths_test() {
+	local out err rc
+	capture bash -c '
+		./build >/dev/null
+		m1="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"
+		m2="{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/notARealMethod\",\"params\":{}}"
+		m3="{\"jsonrpc\":\"2.0\",\"id\":3,\"params\":{}}"
+		s="{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"shutdown\",\"params\":null}"
+		e="{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":null}"
+		{
+			for msg in "$m1" "$m2" "$m3" "$s" "$e"; do
+				printf "Content-Length: %s\r\n\r\n%s" "${#msg}" "$msg"
+			done
+		} | ./zig-out/bin/llvm-lsp
+	'
+
+	assert_eq "$rc" "0" "error-path flow should exit cleanly"
+	assert_contains "$out" '"id":2' "unknown-method response id should be present"
+	assert_contains "$out" '"code":-32601' "unknown method should return -32601"
+	assert_contains "$out" '"id":3' "invalid-request response id should be present"
+	assert_contains "$out" '"code":-32600' "missing method should return -32600"
+}
+
+run_error_paths_test
+
+if (( fail != 0 )); then
+	exit 1
+fi
