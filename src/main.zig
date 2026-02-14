@@ -4,7 +4,7 @@ const parser = @import("core/parser.zig");
 const symbols = @import("core/symbols.zig");
 
 const max_message_bytes = 10 * 1024 * 1024;
-const max_input_bytes = max_message_bytes + (64 * 1024);
+const max_session_bytes = 64 * 1024 * 1024;
 
 const Document = struct {
 	source: []const u8,
@@ -70,7 +70,7 @@ pub fn main() !void {
 fn run(allocator: std.mem.Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer) !u8 {
 	_ = stderr;
 
-	const input = try std.fs.File.stdin().readToEndAlloc(allocator, max_input_bytes);
+	const input = try std.fs.File.stdin().readToEndAlloc(allocator, max_session_bytes);
 	defer allocator.free(input);
 
 	var documents: std.StringHashMapUnmanaged(Document) = .{};

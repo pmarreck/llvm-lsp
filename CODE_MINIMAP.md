@@ -36,6 +36,7 @@
 - Implements completion contexts for symbol prefixes (`@`, `%`, `!`), opcode suggestions after `= `, type suggestions after opcode+space, and label suggestions in `br label %` context.
 - Publishes diagnostics notifications for parse errors (heuristic malformed tokens), undefined locals, duplicate definitions, missing terminators, and minimal `add i32` type-mismatch warnings after open/change; clears diagnostics on close.
 - Emits framed JSON-RPC errors for malformed JSON (`-32700`) and invalid request framing (`-32600`), including oversized content-length rejection.
+- Uses a larger bounded session read cap so repeated large full-sync updates can be processed in one stdin session.
 
 `src/tests.zig`
 - Unit test entrypoint imported by `zig build test`.
@@ -97,6 +98,10 @@
 `tests/cli/ci_workflow`
 - CI guard test.
 - Verifies workflow presence and that it triggers on `push`/`pull_request` while running `./build` and `./test`.
+
+`tests/cli/lsp_large_file_stress`
+- Large-file integration test.
+- Verifies multi-megabyte `didOpen` + `didChange` full-sync flow and post-change `definition` resolution.
 
 `flake.nix`
 - Nix flake defining project development shell and default package build.

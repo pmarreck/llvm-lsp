@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+source "$HOME/dotfiles/bin/src/capture.bash"
+
+fail=0
+
+assert_eq() {
+	local actual="$1"
+	local expected="$2"
+	local message="$3"
+	if [[ "$actual" != "$expected" ]]; then
+		echo "FAIL: $message" >&2
+		echo "  expected: [$expected]" >&2
+		echo "  actual:   [$actual]" >&2
+		fail=1
+	fi
+}
+
+assert_contains() {
+	local haystack="$1"
+	local needle="$2"
+	local message="$3"
+	if [[ "$haystack" != *"$needle"* ]]; then
+		echo "FAIL: $message" >&2
+		echo "  missing: [$needle]" >&2
+		fail=1
+	fi
+}
+
+run_large_file_reparse_test() {
+	local count=220000
+	local use_line=$((count + 3))
+	local def_line=$((count + 2))
+	local out err rc
+	capture bash -c '
+		set -euo pipefail
+		./build >/dev/null
+		count='"$count"'
+		body=$(awk -v n="$count" '"'"'BEGIN{for(i=0;i<n;i++) printf "  %%v%d = add i32 1, 2\\n", i}'"'"')
+		source="define void @f() {\\nentry:\\n${body}  %needle = add i32 2, 3\\n  %use = add i32 %needle, 1\\n  ret void\\n}\\n"
+		uri="file:///tmp/large.ll"
+		use_line='"$use_line"'
+
+		m1="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"
+		m2="{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\",\"text\":\"${source}\"}}}"
+		m3="{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"contentChanges\":[{\"text\":\"${source}\"}]}}"
+		m4="{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":${use_line},\"character\":20}}}"
+		s="{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"shutdown\",\"params\":null}"
+		e="{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":null}"
+
+		if (( ${#m2} < 5000000 || ${#m3} < 5000000 )); then
+			echo "stress fixture is too small for large-file coverage" >&2
+			exit 1
+		fi
+
+		{
+			for msg in "$m1" "$m2" "$m3" "$m4" "$s" "$e"; do
+				printf "Content-Length: %s\r\n\r\n%s" "${#msg}" "$msg"
+			done
+		} | ./zig-out/bin/llvm-lsp
+	'
+
+	assert_eq "$rc" "0" "large didOpen+didChange flow should exit cleanly"
+	assert_contains "$out" '"id":2' "definition response should be present"
+	assert_contains "$out" "\"line\":${def_line}" "definition should resolve in large document after reparse"
+	assert_contains "$out" '"id":9' "shutdown response should be present"
+}
+
+run_large_file_reparse_test
+
+if (( fail != 0 )); then
+	exit 1
+fi
