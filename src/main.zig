@@ -30,6 +30,11 @@ const TokenAtPosition = struct {
 	prefix: u8,
 };
 
+const Position = struct {
+	line: usize,
+	character: usize,
+};
+
 const ParseToken = struct {
 	token: []const u8,
 	next_index: usize,
@@ -393,23 +398,36 @@ fn buildDiagnosticsParamsJson(allocator: std.mem.Allocator, uri: []const u8, doc
 	for (doc.index.references.items) |reference| {
 		if (reference.name.len == 0 or reference.name[0] != '%') continue;
 		const scope = reference.scope_function orelse continue;
+		if (reference.name.len > 1 and hasDefinition(&doc.index, .label, reference.name[1..], scope)) continue;
 		if (hasDefinition(&doc.index, .local, reference.name, scope)) continue;
 		if (hasDefinition(&doc.index, .param, reference.name, scope)) continue;
 		if (hasDefinition(&doc.index, .type_alias, reference.name, null)) continue;
 
-		if (wrote_any) {
-			try out.appendSlice(allocator, ",");
-		}
-		wrote_any = true;
 		const message = try std.fmt.allocPrint(allocator, "undefined symbol {s}", .{reference.name});
 		defer allocator.free(message);
-		const piece = try std.fmt.allocPrint(
-			allocator,
-			"{{\"range\":{{\"start\":{{\"line\":{d},\"character\":0}},\"end\":{{\"line\":{d},\"character\":{d}}}}},\"severity\":1,\"source\":\"llvm-lsp\",\"message\":\"{s}\"}}",
-			.{ reference.line - 1, reference.line - 1, reference.name.len, message },
-		);
-		defer allocator.free(piece);
-		try out.appendSlice(allocator, piece);
+		try appendDiagnostic(allocator, &out, &wrote_any, reference.line - 1, reference.name.len, message);
+	}
+
+	var i: usize = 0;
+	while (i < doc.index.symbols.items.len) : (i += 1) {
+		const symbol = doc.index.symbols.items[i];
+		if (!isDuplicateCheckedKind(symbol.kind)) continue;
+
+		var seen_before = false;
+		var j: usize = 0;
+		while (j < i) : (j += 1) {
+			const previous = doc.index.symbols.items[j];
+			if (previous.kind != symbol.kind) continue;
+			if (!std.mem.eql(u8, previous.name, symbol.name)) continue;
+			if (!scopeEqual(previous.scope_function, symbol.scope_function)) continue;
+			seen_before = true;
+			break;
+		}
+		if (!seen_before) continue;
+
+		const message = try std.fmt.allocPrint(allocator, "duplicate definition {s}", .{symbol.name});
+		defer allocator.free(message);
+		try appendDiagnostic(allocator, &out, &wrote_any, symbol.line - 1, symbol.name.len, message);
 	}
 
 	var in_function = false;
@@ -435,17 +453,7 @@ fn buildDiagnosticsParamsJson(allocator: std.mem.Allocator, uri: []const u8, doc
 
 		if (trimmed[0] == '}') {
 			if (last_instruction_line > 0 and !last_was_terminator) {
-				if (wrote_any) {
-					try out.appendSlice(allocator, ",");
-				}
-				wrote_any = true;
-				const piece = try std.fmt.allocPrint(
-					allocator,
-					"{{\"range\":{{\"start\":{{\"line\":{d},\"character\":0}},\"end\":{{\"line\":{d},\"character\":{d}}}}},\"severity\":1,\"source\":\"llvm-lsp\",\"message\":\"missing terminator\"}}",
-					.{ last_instruction_line - 1, last_instruction_line - 1, last_instruction_len },
-				);
-				defer allocator.free(piece);
-				try out.appendSlice(allocator, piece);
+				try appendDiagnostic(allocator, &out, &wrote_any, last_instruction_line - 1, last_instruction_len, "missing terminator");
 			}
 			in_function = false;
 			continue;
@@ -468,6 +476,27 @@ fn buildDiagnosticsParamsJson(allocator: std.mem.Allocator, uri: []const u8, doc
 
 	try out.appendSlice(allocator, "]}");
 	return try out.toOwnedSlice(allocator);
+}
+
+fn appendDiagnostic(allocator: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8), wrote_any: *bool, line: usize, len: usize, message: []const u8) !void {
+	if (wrote_any.*) {
+		try out.appendSlice(allocator, ",");
+	}
+	wrote_any.* = true;
+	const piece = try std.fmt.allocPrint(
+		allocator,
+		"{{\"range\":{{\"start\":{{\"line\":{d},\"character\":0}},\"end\":{{\"line\":{d},\"character\":{d}}}}},\"severity\":1,\"source\":\"llvm-lsp\",\"message\":\"{s}\"}}",
+		.{ line, line, len, message },
+	);
+	defer allocator.free(piece);
+	try out.appendSlice(allocator, piece);
+}
+
+fn isDuplicateCheckedKind(kind: symbols.SymbolKind) bool {
+	return switch (kind) {
+		.function_def, .global, .type_alias, .local, .param, .label, .metadata => true,
+		else => false,
+	};
 }
 
 fn trimSourceLine(line: []const u8) []const u8 {
@@ -497,25 +526,36 @@ fn handleHover(allocator: std.mem.Allocator, documents: *std.StringHashMapUnmana
 	const pos = parsePosition(params) orelse return error.InvalidRequest;
 
 	const doc = documents.getPtr(uri) orelse return allocator.dupe(u8, "null");
-	const token = resolveTokenAt(doc.source, pos.line, pos.character) orelse return allocator.dupe(u8, "null");
-	const query = classifyQuery(doc, token) orelse return allocator.dupe(u8, "null");
-	const definition = findDefinitionSymbol(&doc.index, query) orelse return allocator.dupe(u8, "null");
+	if (resolveTokenAt(doc.source, pos.line, pos.character)) |token| {
+		const query = classifyQuery(doc, token) orelse return allocator.dupe(u8, "null");
+		const definition = findDefinitionSymbol(&doc.index, query) orelse return allocator.dupe(u8, "null");
 
-	const content = switch (definition.kind) {
-		.function_def, .function_decl => try std.fmt.allocPrint(allocator, "`{s}` function", .{definition.name}),
-		.global => try std.fmt.allocPrint(allocator, "`{s}` global", .{definition.name}),
-		.type_alias => try std.fmt.allocPrint(allocator, "`{s}` type alias", .{definition.name}),
-		.local, .param => try std.fmt.allocPrint(allocator, "`{s}` local", .{definition.name}),
-		.label => try std.fmt.allocPrint(allocator, "`{s}` label", .{definition.name}),
-		.metadata => try std.fmt.allocPrint(allocator, "`{s}` metadata", .{definition.name}),
-	};
-	defer allocator.free(content);
+		const content = switch (definition.kind) {
+			.function_def, .function_decl => try std.fmt.allocPrint(allocator, "`{s}` function", .{definition.name}),
+			.global => try std.fmt.allocPrint(allocator, "`{s}` global", .{definition.name}),
+			.type_alias => try std.fmt.allocPrint(allocator, "`{s}` type alias", .{definition.name}),
+			.local, .param => try std.fmt.allocPrint(allocator, "`{s}` local", .{definition.name}),
+			.label => try std.fmt.allocPrint(allocator, "`{s}` label", .{definition.name}),
+			.metadata => try std.fmt.allocPrint(allocator, "`{s}` metadata", .{definition.name}),
+		};
+		defer allocator.free(content);
 
-	return try std.fmt.allocPrint(
-		allocator,
-		"{{\"contents\":{{\"kind\":\"markdown\",\"value\":\"{s}\"}}}}",
-		.{content},
-	);
+		return try std.fmt.allocPrint(
+			allocator,
+			"{{\"contents\":{{\"kind\":\"markdown\",\"value\":\"{s}\"}}}}",
+			.{content},
+		);
+	}
+
+	if (resolveOpcodeHover(pos, doc.source)) |description| {
+		return try std.fmt.allocPrint(
+			allocator,
+			"{{\"contents\":{{\"kind\":\"markdown\",\"value\":\"{s}\"}}}}",
+			.{description},
+		);
+	}
+
+	return allocator.dupe(u8, "null");
 }
 
 fn handleCompletion(allocator: std.mem.Allocator, documents: *std.StringHashMapUnmanaged(Document), root: std.json.Value) ![]u8 {
@@ -534,6 +574,7 @@ fn handleCompletion(allocator: std.mem.Allocator, documents: *std.StringHashMapU
 
 	const scope = inferFunctionScopeForLine(&doc.index, pos.line + 1);
 	var handled_trigger = false;
+	const label_completion_context = isLabelCompletionContext(line, pos.character);
 
 	for (doc.index.symbols.items) |sym| {
 		switch (trigger) {
@@ -546,19 +587,27 @@ fn handleCompletion(allocator: std.mem.Allocator, documents: *std.StringHashMapU
 				},
 				else => {},
 			},
-			'%' => switch (sym.kind) {
-				.local, .param => {
-					if (scopeEqual(sym.scope_function, scope)) {
-						try labels.put(allocator, sym.name, {});
-					}
-					handled_trigger = true;
+				'%' => switch (sym.kind) {
+					.label => {
+						if (label_completion_context and scopeEqual(sym.scope_function, scope)) {
+							try labels.put(allocator, sym.name, {});
+							handled_trigger = true;
+						}
+					},
+					.local, .param => {
+						if (!label_completion_context and scopeEqual(sym.scope_function, scope)) {
+							try labels.put(allocator, sym.name, {});
+							handled_trigger = true;
+						}
+					},
+					.type_alias => {
+						if (!label_completion_context) {
+							try labels.put(allocator, sym.name, {});
+							handled_trigger = true;
+						}
+					},
+					else => {},
 				},
-				.type_alias => {
-					try labels.put(allocator, sym.name, {});
-					handled_trigger = true;
-				},
-				else => {},
-			},
 			'!' => switch (sym.kind) {
 				.metadata => {
 					try labels.put(allocator, sym.name, {});
@@ -637,6 +686,48 @@ fn endsWithOpcodeSpace(before_cursor: []const u8) bool {
 		std.mem.endsWith(u8, before_cursor, "ret ") or
 		std.mem.endsWith(u8, before_cursor, "br ") or
 		std.mem.endsWith(u8, before_cursor, "alloca ");
+}
+
+fn isLabelCompletionContext(line: []const u8, character: usize) bool {
+	if (character == 0 or character > line.len) return false;
+	const before_cursor = line[0..character];
+	return std.mem.endsWith(u8, before_cursor, "label %");
+}
+
+fn resolveOpcodeHover(pos: Position, source: []const u8) ?[]const u8 {
+	const line = getLineAt(source, pos.line) orelse return null;
+	const word = getWordAtPosition(line, pos.character) orelse return null;
+	return switchOpcodeHover(word);
+}
+
+fn getWordAtPosition(line: []const u8, character: usize) ?[]const u8 {
+	if (line.len == 0) return null;
+	const cursor = if (character >= line.len) line.len - 1 else character;
+	if (!isWordChar(line[cursor])) return null;
+
+	var start = cursor;
+	while (start > 0 and isWordChar(line[start - 1])) : (start -= 1) {}
+
+	var end = cursor + 1;
+	while (end < line.len and isWordChar(line[end])) : (end += 1) {}
+
+	if (end <= start) return null;
+	return line[start..end];
+}
+
+fn isWordChar(c: u8) bool {
+	return std.ascii.isAlphabetic(c);
+}
+
+fn switchOpcodeHover(word: []const u8) ?[]const u8 {
+	if (std.mem.eql(u8, word, "ret")) return "Return from function";
+	if (std.mem.eql(u8, word, "br")) return "Branch to target label";
+	if (std.mem.eql(u8, word, "add")) return "Integer addition";
+	if (std.mem.eql(u8, word, "store")) return "Store a value to memory";
+	if (std.mem.eql(u8, word, "load")) return "Load a value from memory";
+	if (std.mem.eql(u8, word, "call")) return "Call a function";
+	if (std.mem.eql(u8, word, "alloca")) return "Allocate stack memory";
+	return null;
 }
 
 fn appendLocationJson(allocator: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8), wrote_any: *bool, uri: []const u8, line: usize, name_len: usize) !void {
@@ -840,7 +931,7 @@ fn isSymbolChar(c: u8) bool {
 	return std.ascii.isAlphanumeric(c) or c == '_' or c == '.' or c == '$' or c == '-';
 }
 
-fn parsePosition(params: std.json.Value) ?struct { line: usize, character: usize } {
+fn parsePosition(params: std.json.Value) ?Position {
 	const position = getField(params, "position") orelse return null;
 	const line_value = getIntegerField(position, "line") orelse return null;
 	const character_value = getIntegerField(position, "character") orelse return null;

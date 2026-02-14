@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+source "$HOME/dotfiles/bin/src/capture.bash"
+
+fail=0
+
+assert_eq() {
+	local actual="$1"
+	local expected="$2"
+	local message="$3"
+	if [[ "$actual" != "$expected" ]]; then
+		echo "FAIL: $message" >&2
+		echo "  expected: [$expected]" >&2
+		echo "  actual:   [$actual]" >&2
+		fail=1
+	fi
+}
+
+assert_contains() {
+	local haystack="$1"
+	local needle="$2"
+	local message="$3"
+	if [[ "$haystack" != *"$needle"* ]]; then
+		echo "FAIL: $message" >&2
+		echo "  missing: [$needle]" >&2
+		echo "  actual:  [$haystack]" >&2
+		fail=1
+	fi
+}
+
+run_hover_label_completion_test() {
+	local out err rc
+	capture bash -c '
+		./build >/dev/null
+		uri="file:///tmp/hover-label.ll"
+		source="define void @f(i1 %cond) {\nentry:\n  br i1 %cond, label %then, label %else\nthen:\n  ret void\nelse:\n  br label %\nexit:\n  ret void\n}\n"
+		m1="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"
+		m2="{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\",\"text\":\"${source}\"}}}"
+		m3="{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":4,\"character\":3}}}"
+		m4="{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":6,\"character\":12}}}"
+		s="{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"shutdown\",\"params\":null}"
+		e="{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":null}"
+		{
+			for msg in "$m1" "$m2" "$m3" "$m4" "$s" "$e"; do
+				printf "Content-Length: %s\r\n\r\n%s" "${#msg}" "$msg"
+			done
+		} | ./zig-out/bin/llvm-lsp
+	'
+
+	assert_eq "$rc" "0" "hover+label completion flow should exit cleanly"
+	assert_contains "$out" '"id":12' "opcode hover response should be present"
+	assert_contains "$out" 'Return from function' "ret hover should include opcode description"
+	assert_contains "$out" '"id":13' "label completion response should be present"
+	assert_contains "$out" '"label":"then"' "label completion should include then"
+	assert_contains "$out" '"label":"else"' "label completion should include else"
+	assert_contains "$out" '"label":"exit"' "label completion should include exit"
+}
+
+run_hover_label_completion_test
+
+if (( fail != 0 )); then
+	exit 1
+fi

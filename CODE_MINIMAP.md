@@ -27,7 +27,9 @@
 - LSP server runtime and transport implementation.
 - Handles framing/lifecycle (`initialize`, `initialized`, `shutdown`, `exit`), plus `didOpen`/`didChange`/`didClose`.
 - Implements `definition`, `references`, `documentSymbol`, `hover`, and `completion` request handlers.
-- Publishes diagnostics notifications for undefined local symbols and missing terminators after open/change; clears diagnostics on close.
+- Implements hover fallback for opcode keywords (e.g., `ret`, `br`, `add`) when no symbol token is under cursor.
+- Implements completion contexts for symbol prefixes (`@`, `%`, `!`), opcode suggestions after `= `, type suggestions after opcode+space, and label suggestions in `br label %` context.
+- Publishes diagnostics notifications for undefined locals, duplicate definitions, and missing terminators after open/change; clears diagnostics on close.
 - Emits framed JSON-RPC errors for malformed JSON (`-32700`) and invalid request framing (`-32600`), including oversized content-length rejection.
 
 `src/tests.zig`
@@ -66,11 +68,15 @@
 
 `tests/cli/lsp_diagnostics`
 - Integration test for diagnostics notifications.
-- Verifies undefined-symbol and missing-terminator diagnostics are published with error severity.
+- Verifies undefined-symbol, duplicate-definition, and missing-terminator diagnostics are published with error severity.
 
 `tests/cli/lsp_document_lifecycle`
 - Integration test for document synchronization semantics.
 - Verifies `didChange` reparses content and `didClose` invalidates lookup results.
+
+`tests/cli/lsp_hover_label_completion`
+- Integration test for opcode hover and branch-label completion.
+- Verifies hover description for `ret` and completion labels in `br label %` context.
 
 `flake.nix`
 - Nix flake defining project development shell and default package build.

@@ -31,8 +31,12 @@
 - [x] Add diagnostics integration tests and implement `publishDiagnostics` for undefined locals and missing terminators. (completed 2026-02-14 16:53 EST)
 - [x] Add document lifecycle integration test for `didChange` reparse and `didClose` invalidation semantics. (completed 2026-02-14 16:46 EST)
 - [ ] Add failing tests for parser duplicate-symbol diagnostics and implement duplicate-definition reporting.
-- [ ] Add failing tests for opcode-hover descriptions and implement instruction hover docs.
-- [ ] Add failing tests for completion in `br label %` context and implement label completions by function scope.
+- [x] Add failing tests for parser duplicate-symbol diagnostics and implement duplicate-definition reporting. (completed 2026-02-14 16:06 EST)
+- [x] Add failing tests for opcode-hover descriptions and implement instruction hover docs. (completed 2026-02-14 16:12 EST)
+- [x] Add failing tests for completion in `br label %` context and implement label completions by function scope. (completed 2026-02-14 16:12 EST)
+- [ ] Add failing tests for parse-error diagnostics on malformed IR snippets and implement parse-recovery diagnostics emission.
+- [ ] Add failing tests for type-mismatch diagnostics and implement minimal operand-type checks.
+- [ ] Add failing tests for LSP unknown-method and malformed-request error bodies across all request paths.
 
 ## Curiosity Pokes To Revisit
 - Clarify whether `references` should include declaration by default.
