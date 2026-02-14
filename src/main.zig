@@ -563,15 +563,23 @@ fn handleHover(allocator: std.mem.Allocator, documents: *std.StringHashMapUnmana
 	if (resolveTokenAt(doc.source, pos.line, pos.character)) |token| {
 		const query = classifyQuery(doc, token) orelse return allocator.dupe(u8, "null");
 		const definition = findDefinitionSymbol(&doc.index, query) orelse return allocator.dupe(u8, "null");
-
-		const content = switch (definition.kind) {
-			.function_def, .function_decl => try std.fmt.allocPrint(allocator, "`{s}` function", .{definition.name}),
-			.global => try std.fmt.allocPrint(allocator, "`{s}` global", .{definition.name}),
-			.type_alias => try std.fmt.allocPrint(allocator, "`{s}` type alias", .{definition.name}),
-			.local, .param => try std.fmt.allocPrint(allocator, "`{s}` local", .{definition.name}),
-			.label => try std.fmt.allocPrint(allocator, "`{s}` label", .{definition.name}),
-			.metadata => try std.fmt.allocPrint(allocator, "`{s}` metadata", .{definition.name}),
+		const kind_name = switch (definition.kind) {
+			.function_def, .function_decl => "function",
+			.global => "global",
+			.type_alias => "type alias",
+			.local, .param => "local",
+			.label => "label",
+			.metadata => "metadata",
 		};
+		const maybe_line = getLineAt(doc.source, definition.line - 1);
+		const content = if (maybe_line) |line|
+			try std.fmt.allocPrint(
+				allocator,
+				"`{s}` {s} (from: {s})",
+				.{ definition.name, kind_name, std.mem.trim(u8, line, " \t\r") },
+			)
+		else
+			try std.fmt.allocPrint(allocator, "`{s}` {s}", .{ definition.name, kind_name });
 		defer allocator.free(content);
 
 		return try std.fmt.allocPrint(

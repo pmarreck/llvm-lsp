@@ -43,10 +43,11 @@ run_assist_flow_test() {
 		m6="{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":9,\"character\":19}}}"
 		m7="{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":6,\"character\":8}}}"
 		m8="{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":7,\"character\":12}}}"
+		m9="{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":5,\"character\":3}}}"
 		s="{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"shutdown\",\"params\":null}"
 		e="{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":null}"
 		{
-			for msg in "$m1" "$m2" "$m3" "$m4" "$m5" "$m6" "$m7" "$m8" "$s" "$e"; do
+			for msg in "$m1" "$m2" "$m3" "$m4" "$m5" "$m6" "$m7" "$m8" "$m9" "$s" "$e"; do
 				printf "Content-Length: %s\r\n\r\n%s" "${#msg}" "$msg"
 			done
 		} | ./zig-out/bin/llvm-lsp
@@ -70,6 +71,9 @@ run_assist_flow_test() {
 	assert_contains "$out" '"id":11' "type completion response should be present"
 	assert_contains "$out" '"label":"i32"' "type completion should include i32"
 	assert_contains "$out" '"label":"ptr"' "type completion should include ptr"
+	assert_contains "$out" '"id":14' "local hover response should be present"
+	assert_contains "$out" 'local (from:' "local hover should include defining instruction context prefix"
+	assert_contains "$out" '%x = alloca i32' "local hover should include defining instruction line"
 }
 
 run_assist_flow_test

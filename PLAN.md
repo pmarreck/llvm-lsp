@@ -37,7 +37,7 @@
 - [x] Add failing tests for parse-error diagnostics on malformed IR snippets and implement parse-recovery diagnostics emission. (completed 2026-02-14 16:25 EST)
 - [x] Add failing tests for type-mismatch diagnostics and implement minimal operand-type checks. (completed 2026-02-14 16:25 EST)
 - [x] Add failing tests for LSP unknown-method and malformed-request error bodies across all request paths. (completed 2026-02-14 16:29 EST)
-- [ ] Add failing tests for richer hover on locals/globals (type + defining instruction snippets) and improve hover content formatting.
+- [x] Add failing tests for richer hover on locals/globals (type + defining instruction snippets) and improve hover content formatting. (completed 2026-02-14 16:35 EST)
 - [ ] Add failing tests for `documentSymbol` kind/range fidelity against more diverse LLVM IR constructs.
 
 ## Curiosity Pokes To Revisit

@@ -27,7 +27,7 @@
 - LSP server runtime and transport implementation.
 - Handles framing/lifecycle (`initialize`, `initialized`, `shutdown`, `exit`), plus `didOpen`/`didChange`/`didClose`.
 - Implements `definition`, `references`, `documentSymbol`, `hover`, and `completion` request handlers.
-- Implements hover fallback for opcode keywords (e.g., `ret`, `br`, `add`) when no symbol token is under cursor.
+- Implements symbol hover with defining-line context snippets plus opcode-keyword hover fallback (`ret`, `br`, `add`, etc.) when no symbol token is under cursor.
 - Implements completion contexts for symbol prefixes (`@`, `%`, `!`), opcode suggestions after `= `, type suggestions after opcode+space, and label suggestions in `br label %` context.
 - Publishes diagnostics notifications for parse errors (heuristic malformed tokens), undefined locals, duplicate definitions, missing terminators, and minimal `add i32` type-mismatch warnings after open/change; clears diagnostics on close.
 - Emits framed JSON-RPC errors for malformed JSON (`-32700`) and invalid request framing (`-32600`), including oversized content-length rejection.
