@@ -17,12 +17,20 @@ pub fn parseModule(allocator: std.mem.Allocator, source: []const u8) !symbols.In
 			if (std.mem.startsWith(u8, trimmed, "%") and std.mem.indexOf(u8, trimmed, "= type") != null) {
 				const token = parseTokenAt(trimmed, 0) orelse continue;
 				try index.addSymbol(.type_alias, token.token, line_no, null);
+				if (std.mem.indexOfScalar(u8, trimmed, '=')) |eq_pos| {
+					const rhs = trimmed[eq_pos + 1 ..];
+					try collectReferences(&index, rhs, line_no, null);
+				}
 				continue;
 			}
 
 			if (std.mem.startsWith(u8, trimmed, "@") and std.mem.indexOfScalar(u8, trimmed, '=') != null) {
 				const token = parseTokenAt(trimmed, 0) orelse continue;
 				try index.addSymbol(.global, token.token, line_no, null);
+				if (std.mem.indexOfScalar(u8, trimmed, '=')) |eq_pos| {
+					const rhs = trimmed[eq_pos + 1 ..];
+					try collectReferences(&index, rhs, line_no, null);
+				}
 				continue;
 			}
 
@@ -43,6 +51,10 @@ pub fn parseModule(allocator: std.mem.Allocator, source: []const u8) !symbols.In
 			if (std.mem.startsWith(u8, trimmed, "!") and std.mem.indexOfScalar(u8, trimmed, '=') != null) {
 				const token = parseTokenAt(trimmed, 0) orelse continue;
 				try index.addSymbol(.metadata, token.token, line_no, null);
+				if (std.mem.indexOfScalar(u8, trimmed, '=')) |eq_pos| {
+					const rhs = trimmed[eq_pos + 1 ..];
+					try collectReferences(&index, rhs, line_no, null);
+				}
 				continue;
 			}
 
@@ -106,7 +118,15 @@ fn parseTokenAt(line: []const u8, start: usize) ?ParsedToken {
 
 	if (line[start + 1] == '"') {
 		var i = start + 2;
-		while (i < line.len and line[i] != '"') : (i += 1) {}
+		while (i < line.len) {
+			if (line[i] == '\\') {
+				if (i + 1 >= line.len) return null;
+				i += 2;
+				continue;
+			}
+			if (line[i] == '"') break;
+			i += 1;
+		}
 		if (i >= line.len) return null;
 		return .{
 			.token = line[start .. i + 1],
@@ -226,4 +246,45 @@ test "parser counts local references from rhs operands" {
 	defer index.deinit();
 
 	try std.testing.expectEqual(@as(usize, 2), index.countReferences("%x", "@f"));
+}
+
+test "parser collects top-level and metadata references" {
+	const source =
+		"@g1 = global i32 0\n" ++
+		"@g2 = global ptr @g1\n" ++
+		"!0 = !{i32 1}\n" ++
+		"!llvm.module.flags = !{!0}\n" ++
+		"define void @f() {\n" ++
+		"entry:\n" ++
+		"  ret void, !dbg !0\n" ++
+		"}\n";
+
+	var index = try parseModule(std.testing.allocator, source);
+	defer index.deinit();
+
+	try std.testing.expect(index.hasDefinition(.global, "@g1", null, 1));
+	try std.testing.expect(index.hasDefinition(.global, "@g2", null, 2));
+	try std.testing.expect(index.hasDefinition(.metadata, "!0", null, 3));
+	try std.testing.expect(index.hasDefinition(.metadata, "!llvm.module.flags", null, 4));
+	try std.testing.expectEqual(@as(usize, 1), index.countReferences("@g1", null));
+	try std.testing.expectEqual(@as(usize, 1), index.countReferences("!0", null));
+	try std.testing.expectEqual(@as(usize, 1), index.countReferences("!0", "@f"));
+}
+
+test "parser handles quoted identifiers with escaped quotes" {
+	const source =
+		"define void @\"fun\\\"name\"(ptr %\"arg\\\"name\") {\n" ++
+		"entry:\n" ++
+		"  %\"tmp\\\"id\" = alloca i32\n" ++
+		"  store i32 1, ptr %\"tmp\\\"id\"\n" ++
+		"  ret void\n" ++
+		"}\n";
+
+	var index = try parseModule(std.testing.allocator, source);
+	defer index.deinit();
+
+	try std.testing.expect(index.hasDefinition(.function_def, "@\"fun\\\"name\"", null, 1));
+	try std.testing.expect(index.hasDefinition(.param, "%\"arg\\\"name\"", "@\"fun\\\"name\"", 1));
+	try std.testing.expect(index.hasDefinition(.local, "%\"tmp\\\"id\"", "@\"fun\\\"name\"", 3));
+	try std.testing.expectEqual(@as(usize, 1), index.countReferences("%\"tmp\\\"id\"", "@\"fun\\\"name\""));
 }

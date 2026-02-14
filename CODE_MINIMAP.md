@@ -38,8 +38,10 @@
 
 `src/core/parser.zig`
 - Minimal LLVM IR text parser spike for top-level/module/function-local symbol extraction.
-- Parses type aliases, globals, function decl/defs, params, labels, local defs, and operand references with per-function scoping.
-- Contains unit tests validating extraction, `%0` scope isolation across functions, and RHS local reference counting.
+- Parses type aliases, globals, metadata defs, function decl/defs, params, labels, local defs, and operand references with per-function scoping.
+- Collects top-level RHS references for global/type/metadata assignment lines.
+- Supports quoted `%/@/!` identifiers including escaped quotes within quoted names.
+- Contains unit tests validating extraction, `%0` scope isolation across functions, RHS local reference counting, top-level/metadata reference extraction, and escaped quoted identifier handling.
 
 `tests/cli/m0_lifecycle`
 - CLI integration test covering M0 lifecycle behavior.
