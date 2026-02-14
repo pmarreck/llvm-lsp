@@ -41,6 +41,7 @@
 - Parses type aliases, globals, metadata defs, function decl/defs, params, labels, local defs, and operand references with per-function scoping.
 - Collects top-level RHS references for global/type/metadata assignment lines.
 - Collects top-level parameter-signature references from both `declare` and `define` lines.
+- Tracks multiline metadata blocks (e.g., `distinct !{ ... }`) to collect continuation-line references.
 - Supports quoted `%/@/!` identifiers including escaped quotes within quoted names.
 - Contains unit tests validating extraction, `%0` scope isolation across functions, RHS local reference counting, top-level/metadata reference extraction, escaped quoted identifier handling, and signature-level type alias references.
 

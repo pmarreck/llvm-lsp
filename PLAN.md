@@ -23,9 +23,9 @@
 - [x] Re-run full suite and build matrix after parser coverage increment. (completed 2026-02-14 15:29 EST)
 - [x] Update `CODE_MINIMAP.md` for new parser behaviors/tests. (completed 2026-02-14 15:32 EST)
 - [ ] Add failing tests for attributes/calling conventions/complex constants and extend parser accordingly.
-- [ ] Add failing tests for metadata edge forms (`distinct`, nested tuples, named metadata refs) and extend parser accordingly.
+- [x] Add failing tests for metadata edge forms (`distinct`, nested tuples, named metadata refs) and extend parser accordingly. (completed 2026-02-14 15:35 EST; multiline `distinct` references covered)
 - [ ] Add failing tests for instruction-level reference extraction beyond `%/@/!` token scanning (labels, inline asm edge cases).
-- [x] Add failing test for type-alias references in `declare`/`define` signatures and implement support. (completed 2026-02-14 15:40 EST)
+- [x] Add failing test for type-alias references in `declare`/`define` signatures and implement support. (completed 2026-02-14 15:33 EST)
 
 ## Curiosity Pokes To Revisit
 - Clarify whether `references` should include declaration by default.

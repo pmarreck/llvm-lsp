@@ -6,12 +6,19 @@ pub fn parseModule(allocator: std.mem.Allocator, source: []const u8) !symbols.In
 	errdefer index.deinit();
 
 	var current_function: ?[]const u8 = null;
+	var metadata_block_depth: usize = 0;
 	var line_no: usize = 0;
 	var lines = std.mem.splitScalar(u8, source, '\n');
 	while (lines.next()) |raw_line| {
 		line_no += 1;
 		const trimmed = trimSourceLine(raw_line);
 		if (trimmed.len == 0) continue;
+
+		if (current_function == null and metadata_block_depth > 0) {
+			try collectReferences(&index, trimmed, line_no, null);
+			metadata_block_depth = advanceBraceDepth(metadata_block_depth, trimmed);
+			continue;
+		}
 
 		if (current_function == null) {
 			if (std.mem.startsWith(u8, trimmed, "%") and std.mem.indexOf(u8, trimmed, "= type") != null) {
@@ -56,6 +63,7 @@ pub fn parseModule(allocator: std.mem.Allocator, source: []const u8) !symbols.In
 				if (std.mem.indexOfScalar(u8, trimmed, '=')) |eq_pos| {
 					const rhs = trimmed[eq_pos + 1 ..];
 					try collectReferences(&index, rhs, line_no, null);
+					metadata_block_depth = advanceBraceDepth(0, rhs);
 				}
 				continue;
 			}
@@ -177,6 +185,20 @@ fn collectSignatureParamReferences(index: *symbols.Index, line: []const u8, line
 	if (close <= open + 1) return;
 	const params = line[open + 1 .. close];
 	try collectReferences(index, params, line_no, null);
+}
+
+fn advanceBraceDepth(depth: usize, text: []const u8) usize {
+	var next = depth;
+	for (text) |c| {
+		switch (c) {
+			'{' => next += 1,
+			'}' => {
+				if (next > 0) next -= 1;
+			},
+			else => {},
+		}
+	}
+	return next;
 }
 
 fn collectReferences(index: *symbols.Index, line: []const u8, line_no: usize, function_name: ?[]const u8) !void {
@@ -315,4 +337,19 @@ test "parser collects type references from declare and define signatures" {
 	try std.testing.expect(index.hasDefinition(.type_alias, "%struct.Foo", null, 1));
 	try std.testing.expectEqual(@as(usize, 2), index.countReferences("%struct.Foo", null));
 	try std.testing.expectEqual(@as(usize, 1), index.countReferences("@consume", "@run"));
+}
+
+test "parser collects references from multiline distinct metadata" {
+	const source =
+		"!0 = !{i32 1}\n" ++
+		"!1 = distinct !{\n" ++
+		"  !0\n" ++
+		"}\n";
+
+	var index = try parseModule(std.testing.allocator, source);
+	defer index.deinit();
+
+	try std.testing.expect(index.hasDefinition(.metadata, "!0", null, 1));
+	try std.testing.expect(index.hasDefinition(.metadata, "!1", null, 2));
+	try std.testing.expectEqual(@as(usize, 1), index.countReferences("!0", null));
 }
