@@ -405,7 +405,7 @@ fn buildDiagnosticsParamsJson(allocator: std.mem.Allocator, uri: []const u8, doc
 
 		const message = try std.fmt.allocPrint(allocator, "undefined symbol {s}", .{reference.name});
 		defer allocator.free(message);
-		try appendDiagnostic(allocator, &out, &wrote_any, reference.line - 1, reference.name.len, message);
+		try appendDiagnostic(allocator, &out, &wrote_any, reference.line - 1, reference.name.len, 1, message);
 	}
 
 	var i: usize = 0;
@@ -427,13 +427,15 @@ fn buildDiagnosticsParamsJson(allocator: std.mem.Allocator, uri: []const u8, doc
 
 		const message = try std.fmt.allocPrint(allocator, "duplicate definition {s}", .{symbol.name});
 		defer allocator.free(message);
-		try appendDiagnostic(allocator, &out, &wrote_any, symbol.line - 1, symbol.name.len, message);
+		try appendDiagnostic(allocator, &out, &wrote_any, symbol.line - 1, symbol.name.len, 1, message);
 	}
 
 	var in_function = false;
 	var last_instruction_line: usize = 0;
 	var last_instruction_len: usize = 0;
 	var last_was_terminator = false;
+	var ptr_locals: std.StringHashMapUnmanaged(void) = .{};
+	defer ptr_locals.deinit(allocator);
 	var line_no: usize = 0;
 	var lines = std.mem.splitScalar(u8, doc.source, '\n');
 	while (lines.next()) |raw_line| {
@@ -441,11 +443,16 @@ fn buildDiagnosticsParamsJson(allocator: std.mem.Allocator, uri: []const u8, doc
 		const trimmed = trimSourceLine(raw_line);
 		if (trimmed.len == 0) continue;
 
+		if (std.mem.indexOf(u8, trimmed, "???") != null) {
+			try appendDiagnostic(allocator, &out, &wrote_any, line_no - 1, trimmed.len, 1, "parse error");
+		}
+
 		if (!in_function and std.mem.startsWith(u8, trimmed, "define ")) {
 			in_function = true;
 			last_instruction_line = 0;
 			last_instruction_len = 0;
 			last_was_terminator = false;
+			ptr_locals.clearRetainingCapacity();
 			continue;
 		}
 
@@ -453,7 +460,7 @@ fn buildDiagnosticsParamsJson(allocator: std.mem.Allocator, uri: []const u8, doc
 
 		if (trimmed[0] == '}') {
 			if (last_instruction_line > 0 and !last_was_terminator) {
-				try appendDiagnostic(allocator, &out, &wrote_any, last_instruction_line - 1, last_instruction_len, "missing terminator");
+				try appendDiagnostic(allocator, &out, &wrote_any, last_instruction_line - 1, last_instruction_len, 1, "missing terminator");
 			}
 			in_function = false;
 			continue;
@@ -464,7 +471,29 @@ fn buildDiagnosticsParamsJson(allocator: std.mem.Allocator, uri: []const u8, doc
 		var instruction = trimmed;
 		if (trimmed[0] == '%') {
 			if (std.mem.indexOfScalar(u8, trimmed, '=')) |eq_pos| {
+				const lhs = std.mem.trim(u8, trimmed[0..eq_pos], " \t");
 				instruction = std.mem.trim(u8, trimmed[eq_pos + 1 ..], " \t");
+				if (instructionStartsWithPrefix(instruction, "alloca")) {
+					try ptr_locals.put(allocator, lhs, {});
+				}
+				if (instructionStartsWithPrefix(instruction, "add i32")) {
+					var rhs_cursor: usize = 0;
+					while (rhs_cursor < instruction.len) {
+						if (instruction[rhs_cursor] != '%') {
+							rhs_cursor += 1;
+							continue;
+						}
+						const token = parsePrefixedTokenAt(instruction, rhs_cursor) orelse {
+							rhs_cursor += 1;
+							continue;
+						};
+						if (ptr_locals.contains(token.token)) {
+							try appendDiagnostic(allocator, &out, &wrote_any, line_no - 1, token.token.len, 2, "type mismatch in add");
+							break;
+						}
+						rhs_cursor = token.next_index;
+					}
+				}
 			}
 		}
 		if (instruction.len == 0) continue;
@@ -478,18 +507,23 @@ fn buildDiagnosticsParamsJson(allocator: std.mem.Allocator, uri: []const u8, doc
 	return try out.toOwnedSlice(allocator);
 }
 
-fn appendDiagnostic(allocator: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8), wrote_any: *bool, line: usize, len: usize, message: []const u8) !void {
+fn appendDiagnostic(allocator: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8), wrote_any: *bool, line: usize, len: usize, severity: u8, message: []const u8) !void {
 	if (wrote_any.*) {
 		try out.appendSlice(allocator, ",");
 	}
 	wrote_any.* = true;
 	const piece = try std.fmt.allocPrint(
 		allocator,
-		"{{\"range\":{{\"start\":{{\"line\":{d},\"character\":0}},\"end\":{{\"line\":{d},\"character\":{d}}}}},\"severity\":1,\"source\":\"llvm-lsp\",\"message\":\"{s}\"}}",
-		.{ line, line, len, message },
+		"{{\"range\":{{\"start\":{{\"line\":{d},\"character\":0}},\"end\":{{\"line\":{d},\"character\":{d}}}}},\"severity\":{d},\"source\":\"llvm-lsp\",\"message\":\"{s}\"}}",
+		.{ line, line, len, severity, message },
 	);
 	defer allocator.free(piece);
 	try out.appendSlice(allocator, piece);
+}
+
+fn instructionStartsWithPrefix(instruction: []const u8, prefix: []const u8) bool {
+	return std.mem.eql(u8, instruction, prefix) or
+		(instruction.len > prefix.len and std.mem.startsWith(u8, instruction, prefix) and instruction[prefix.len] == ' ');
 }
 
 fn isDuplicateCheckedKind(kind: symbols.SymbolKind) bool {

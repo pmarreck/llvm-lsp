@@ -29,7 +29,7 @@
 - Implements `definition`, `references`, `documentSymbol`, `hover`, and `completion` request handlers.
 - Implements hover fallback for opcode keywords (e.g., `ret`, `br`, `add`) when no symbol token is under cursor.
 - Implements completion contexts for symbol prefixes (`@`, `%`, `!`), opcode suggestions after `= `, type suggestions after opcode+space, and label suggestions in `br label %` context.
-- Publishes diagnostics notifications for undefined locals, duplicate definitions, and missing terminators after open/change; clears diagnostics on close.
+- Publishes diagnostics notifications for parse errors (heuristic malformed tokens), undefined locals, duplicate definitions, missing terminators, and minimal `add i32` type-mismatch warnings after open/change; clears diagnostics on close.
 - Emits framed JSON-RPC errors for malformed JSON (`-32700`) and invalid request framing (`-32600`), including oversized content-length rejection.
 
 `src/tests.zig`
@@ -68,7 +68,7 @@
 
 `tests/cli/lsp_diagnostics`
 - Integration test for diagnostics notifications.
-- Verifies undefined-symbol, duplicate-definition, and missing-terminator diagnostics are published with error severity.
+- Verifies parse-error, undefined-symbol, duplicate-definition, missing-terminator, and type-mismatch diagnostics with expected severities.
 
 `tests/cli/lsp_document_lifecycle`
 - Integration test for document synchronization semantics.
