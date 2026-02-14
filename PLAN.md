@@ -41,6 +41,7 @@
 - [x] Add failing test for module-header indexing (`source_filename`, `target triple`, `target datalayout`) and implement parser/index support. (completed 2026-02-14 16:39 EST)
 - [x] Add failing test for CI presence and create GitHub Actions workflow running `./build` and `./test` on `push`/`pull_request`. (completed 2026-02-14 16:59 EST)
 - [x] Add failing large-file stress test (multi-MB `didOpen` + `didChange` + `definition`) and raise session input cap to handle repeated large full-sync edits. (completed 2026-02-14 17:04 EST)
+- [x] Refactor architecture to split entrypoint/runtime/transport/diagnostics across `src/main.zig`, `src/server.zig`, `src/transport.zig`, and `src/core/diagnostics.zig` while preserving behavior. (completed 2026-02-14 17:11 EST)
 
 ## Curiosity Pokes To Revisit
 - Clarify whether `references` should include declaration by default.

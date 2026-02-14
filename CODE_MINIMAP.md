@@ -28,15 +28,19 @@
 - Runs on `push` to `yolo` and on `pull_request`; installs Nix then executes `./build` and `./test`.
 
 `src/main.zig`
-- LSP server runtime and transport implementation.
-- Handles framing/lifecycle (`initialize`, `initialized`, `shutdown`, `exit`), plus `didOpen`/`didChange`/`didClose`.
-- Implements `definition`, `references`, `documentSymbol`, `hover`, and `completion` request handlers.
-- `documentSymbol` emits functions/globals/type aliases/metadata with full-line `range` and token-specific `selectionRange`.
-- Implements symbol hover with defining-line context snippets plus opcode-keyword hover fallback (`ret`, `br`, `add`, etc.) when no symbol token is under cursor.
-- Implements completion contexts for symbol prefixes (`@`, `%`, `!`), opcode suggestions after `= `, type suggestions after opcode+space, and label suggestions in `br label %` context.
-- Publishes diagnostics notifications for parse errors (heuristic malformed tokens), undefined locals, duplicate definitions, missing terminators, and minimal `add i32` type-mismatch warnings after open/change; clears diagnostics on close.
-- Emits framed JSON-RPC errors for malformed JSON (`-32700`) and invalid request framing (`-32600`), including oversized content-length rejection.
-- Uses a larger bounded session read cap so repeated large full-sync updates can be processed in one stdin session.
+- Thin process entrypoint.
+- Sets up allocator/stdin-stdout-stderr wiring, emits debug build banner, and delegates server runtime to `src/server.zig`.
+
+`src/server.zig`
+- LSP runtime and request-dispatch engine over JSON-RPC/LSP.
+- Handles lifecycle (`initialize`, `initialized`, `shutdown`, `exit`) and document sync (`didOpen`, `didChange`, `didClose`).
+- Implements `definition`, `references`, `documentSymbol`, `hover`, and `completion`.
+- Uses bounded session reads and delegates framing/JSON-RPC envelope work to `src/transport.zig`.
+- Delegates diagnostics payload generation to `src/core/diagnostics.zig`.
+
+`src/transport.zig`
+- LSP stdio transport helpers.
+- Parses `Content-Length` frames with 10MB message cap and writes framed JSON-RPC responses/notifications/errors.
 
 `src/tests.zig`
 - Unit test entrypoint imported by `zig build test`.
@@ -58,6 +62,10 @@
 - Supports quoted `%/@/!` identifiers including escaped quotes within quoted names.
 - Supports `#` attribute-group reference capture and branch-label reference capture (`label %foo` => `foo`).
 - Contains unit tests validating extraction, `%0` scope isolation across functions, RHS local reference counting, top-level/metadata reference extraction, escaped quoted identifier handling, signature-level type alias references, multiline global constants, and label references.
+
+`src/core/diagnostics.zig`
+- Core diagnostics builder independent from transport/server dispatch.
+- Emits diagnostics for parse errors, undefined locals, duplicate definitions, missing terminators, and minimal `add i32` pointer-mismatch warnings.
 
 `tests/cli/m0_lifecycle`
 - CLI integration test covering M0 lifecycle behavior.
