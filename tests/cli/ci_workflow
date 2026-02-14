@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+fail=0
+
+assert_contains() {
+	local haystack="$1"
+	local needle="$2"
+	local message="$3"
+	if [[ "$haystack" != *"$needle"* ]]; then
+		echo "FAIL: $message" >&2
+		echo "  missing: [$needle]" >&2
+		fail=1
+	fi
+}
+
+workflow_path=".github/workflows/ci.yml"
+
+if [[ ! -f "$workflow_path" ]]; then
+	echo "FAIL: CI workflow file missing at $workflow_path" >&2
+	exit 1
+fi
+
+content="$(cat "$workflow_path")"
+assert_contains "$content" "on:" "workflow should define triggers"
+assert_contains "$content" "push:" "workflow should run on push"
+assert_contains "$content" "pull_request:" "workflow should run on pull_request"
+assert_contains "$content" "./build" "workflow should run ./build"
+assert_contains "$content" "./test" "workflow should run ./test"
+
+if (( fail != 0 )); then
+	exit 1
+fi

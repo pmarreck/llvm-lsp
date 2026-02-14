@@ -1,0 +1,23 @@
+name: ci
+
+on:
+	push:
+		branches:
+			- yolo
+	pull_request:
+
+jobs:
+	build-and-test:
+		runs-on: ubuntu-latest
+		steps:
+			- name: Checkout
+				uses: actions/checkout@v4
+
+			- name: Install Nix
+				uses: DeterminateSystems/nix-installer-action@v17
+
+			- name: Build (ReleaseFast)
+				run: ./build
+
+			- name: Test
+				run: ./test

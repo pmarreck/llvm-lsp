@@ -23,6 +23,10 @@
 - Defines executable target and `zig build test` step, with default optimize mode `ReleaseFast`.
 - Unit test step now runs `src/tests.zig` so parser/core tests are part of `./test`.
 
+`.github/workflows/ci.yml`
+- GitHub Actions CI workflow.
+- Runs on `push` to `yolo` and on `pull_request`; installs Nix then executes `./build` and `./test`.
+
 `src/main.zig`
 - LSP server runtime and transport implementation.
 - Handles framing/lifecycle (`initialize`, `initialized`, `shutdown`, `exit`), plus `didOpen`/`didChange`/`didClose`.
@@ -89,6 +93,10 @@
 `tests/cli/lsp_document_symbol_fidelity`
 - Integration test for richer `documentSymbol` behavior.
 - Verifies metadata symbol inclusion and line/token range fidelity for emitted symbols.
+
+`tests/cli/ci_workflow`
+- CI guard test.
+- Verifies workflow presence and that it triggers on `push`/`pull_request` while running `./build` and `./test`.
 
 `flake.nix`
 - Nix flake defining project development shell and default package build.
