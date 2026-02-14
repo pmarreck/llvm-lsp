@@ -28,6 +28,9 @@ pub const Index = struct {
 	allocator: std.mem.Allocator,
 	symbols: std.ArrayListUnmanaged(Symbol) = .{},
 	references: std.ArrayListUnmanaged(Reference) = .{},
+	source_filename: ?[]const u8 = null,
+	target_triple: ?[]const u8 = null,
+	target_datalayout: ?[]const u8 = null,
 
 	pub fn init(allocator: std.mem.Allocator) Index {
 		return .{ .allocator = allocator };

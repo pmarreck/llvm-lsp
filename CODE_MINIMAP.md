@@ -40,9 +40,11 @@
 `src/core/symbols.zig`
 - Core symbol/reference index types.
 - Defines `SymbolKind`, `Symbol`, `Reference`, and `Index` with query helpers (`countByKind`, `hasDefinition`, `countReferences`).
+- `Index` also stores parsed module headers: `source_filename`, `target_triple`, and `target_datalayout`.
 
 `src/core/parser.zig`
 - Minimal LLVM IR text parser spike for top-level/module/function-local symbol extraction.
+- Captures module headers (`source_filename`, `target triple`, `target datalayout`) into `Index`.
 - Parses type aliases, globals, metadata defs, function decl/defs, params, labels, local defs, and operand references with per-function scoping.
 - Avoids misclassifying signature type-alias tokens as parameter definitions in calling-convention-heavy signatures.
 - Collects top-level RHS references for global/type/metadata assignment lines.

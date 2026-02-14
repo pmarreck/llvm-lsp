@@ -21,6 +21,21 @@ pub fn parseModule(allocator: std.mem.Allocator, source: []const u8) !symbols.In
 		}
 
 		if (current_function == null) {
+			if (std.mem.startsWith(u8, trimmed, "source_filename")) {
+				index.source_filename = parseHeaderValue(trimmed);
+				continue;
+			}
+
+			if (std.mem.startsWith(u8, trimmed, "target triple")) {
+				index.target_triple = parseHeaderValue(trimmed);
+				continue;
+			}
+
+			if (std.mem.startsWith(u8, trimmed, "target datalayout")) {
+				index.target_datalayout = parseHeaderValue(trimmed);
+				continue;
+			}
+
 			if (std.mem.startsWith(u8, trimmed, "%") and std.mem.indexOf(u8, trimmed, "= type") != null) {
 				const token = parseTokenAt(trimmed, 0) orelse continue;
 				try index.addSymbol(.type_alias, token.token, line_no, null);
@@ -124,6 +139,14 @@ fn parseNameAfterPrefix(line: []const u8, prefix: u8) ?[]const u8 {
 	const start = std.mem.indexOfScalar(u8, line, prefix) orelse return null;
 	const token = parseTokenAt(line, start) orelse return null;
 	return token.token;
+}
+
+fn parseHeaderValue(line: []const u8) ?[]const u8 {
+	const eq_pos = std.mem.indexOfScalar(u8, line, '=') orelse return null;
+	if (eq_pos + 1 >= line.len) return null;
+	const rhs = std.mem.trim(u8, line[eq_pos + 1 ..], " \t");
+	if (rhs.len == 0) return null;
+	return rhs;
 }
 
 fn parseTokenAt(line: []const u8, start: usize) ?ParsedToken {
@@ -498,4 +521,22 @@ test "parser does not treat type aliases in signatures as parameter definitions"
 	try std.testing.expect(index.hasDefinition(.type_alias, "%S", null, 1));
 	try std.testing.expect(index.hasDefinition(.param, "%item", "@run", 3));
 	try std.testing.expect(!index.hasDefinition(.param, "%S", "@run", 3));
+}
+
+test "parser captures module headers" {
+	const source =
+		"source_filename = \"demo.ll\"\n" ++
+		"target datalayout = \"e-m:e-p:64:64\"\n" ++
+		"target triple = \"x86_64-unknown-linux-gnu\"\n" ++
+		"define void @f() {\n" ++
+		"entry:\n" ++
+		"  ret void\n" ++
+		"}\n";
+
+	var index = try parseModule(std.testing.allocator, source);
+	defer index.deinit();
+
+	try std.testing.expectEqualStrings("\"demo.ll\"", index.source_filename orelse "");
+	try std.testing.expectEqualStrings("\"e-m:e-p:64:64\"", index.target_datalayout orelse "");
+	try std.testing.expectEqualStrings("\"x86_64-unknown-linux-gnu\"", index.target_triple orelse "");
 }

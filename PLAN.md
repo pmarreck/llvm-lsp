@@ -38,6 +38,7 @@
 - [x] Add failing tests for LSP unknown-method and malformed-request error bodies across all request paths. (completed 2026-02-14 16:29 EST)
 - [x] Add failing tests for richer hover on locals/globals (type + defining instruction snippets) and improve hover content formatting. (completed 2026-02-14 16:35 EST)
 - [x] Add failing tests for `documentSymbol` kind/range fidelity against more diverse LLVM IR constructs. (completed 2026-02-14 16:39 EST; metadata symbols + token-aware selection ranges)
+- [x] Add failing test for module-header indexing (`source_filename`, `target triple`, `target datalayout`) and implement parser/index support. (completed 2026-02-14 16:39 EST)
 
 ## Curiosity Pokes To Revisit
 - Clarify whether `references` should include declaration by default.
