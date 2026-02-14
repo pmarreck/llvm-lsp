@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+status=0
+
+if ! ./build --test; then
+	status=1
+fi
+
+if [[ -d tests/cli ]]; then
+	while IFS= read -r test_file; do
+		if ! bash "$test_file"; then
+			status=1
+		fi
+	done < <(find tests/cli -maxdepth 1 -type f -perm -u+x | sort)
+fi
+
+exit "$status"

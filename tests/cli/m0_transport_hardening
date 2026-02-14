@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+source "$HOME/dotfiles/bin/src/capture.bash"
+
+fail=0
+
+assert_eq() {
+	local actual="$1"
+	local expected="$2"
+	local message="$3"
+	if [[ "$actual" != "$expected" ]]; then
+		echo "FAIL: $message" >&2
+		echo "  expected: [$expected]" >&2
+		echo "  actual:   [$actual]" >&2
+		fail=1
+	fi
+}
+
+assert_contains() {
+	local haystack="$1"
+	local needle="$2"
+	local message="$3"
+	if [[ "$haystack" != *"$needle"* ]]; then
+		echo "FAIL: $message" >&2
+		echo "  missing: [$needle]" >&2
+		echo "  actual:  [$haystack]" >&2
+		fail=1
+	fi
+}
+
+run_malformed_json_test() {
+	local out err rc
+	capture bash -c 'payload='"'"'{"jsonrpc":"2.0","id":7,"method":"initialize","params":'"'"'; len=${#payload}; ./build >/dev/null && printf "Content-Length: %s\r\n\r\n%s" "$len" "$payload" | ./zig-out/bin/llvm-lsp'
+	assert_eq "$rc" "0" "malformed JSON should not crash server"
+	assert_contains "$out" '"error"' "malformed JSON should produce JSON-RPC error response"
+	assert_contains "$out" '"code":-32700' "malformed JSON should map to parse error code -32700"
+}
+
+run_non_numeric_content_length_test() {
+	local out err rc
+	capture bash -c './build >/dev/null && printf "Content-Length: nope\r\n\r\n{}" | ./zig-out/bin/llvm-lsp'
+	assert_eq "$rc" "1" "non-numeric content-length should fail the session"
+	assert_contains "$out" '"error"' "non-numeric content-length should return framed error"
+	assert_contains "$out" '"code":-32600' "non-numeric content-length should be invalid request"
+}
+
+run_truncated_body_test() {
+	local out err rc
+	capture bash -c './build >/dev/null && printf "Content-Length: 40\r\n\r\n{\"jsonrpc\":\"2.0\"}" | ./zig-out/bin/llvm-lsp'
+	assert_eq "$rc" "1" "truncated body should fail the session"
+	assert_contains "$out" '"error"' "truncated body should return framed error"
+	assert_contains "$out" '"code":-32600' "truncated body should be invalid request"
+}
+
+run_oversized_content_length_test() {
+	local out err rc
+	capture bash -c './build >/dev/null && printf "Content-Length: 10485761\r\n\r\n{}" | ./zig-out/bin/llvm-lsp'
+	assert_eq "$rc" "1" "oversized content-length should fail the session"
+	assert_contains "$out" '"error"' "oversized content-length should return framed error"
+	assert_contains "$out" '"code":-32600' "oversized content-length should be invalid request"
+}
+
+run_partial_header_no_hang_test() {
+	local out err rc
+	capture bash -c './build >/dev/null && gtimeout 2s bash -c "printf \"Content-Length: 5\" | ./zig-out/bin/llvm-lsp"'
+	assert_eq "$rc" "1" "partial header should terminate with non-zero"
+}
+
+run_malformed_json_test
+run_non_numeric_content_length_test
+run_truncated_body_test
+run_oversized_content_length_test
+run_partial_header_no_hang_test
+
+if (( fail != 0 )); then
+	exit 1
+fi

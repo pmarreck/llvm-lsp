@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+optimize="ReleaseFast"
+run_tests=0
+
+while [[ $# -gt 0 ]]; do
+	case "${1-}" in
+		--debug)
+			optimize="Debug"
+			shift
+			;;
+		--test)
+			run_tests=1
+			shift
+			;;
+		-h|--help)
+			echo "usage: ./build [--debug] [--test]"
+			echo "  default optimize mode: ReleaseFast"
+			exit 0
+			;;
+		*)
+			echo "unknown option: $1" >&2
+			echo "use --help" >&2
+			exit 2
+			;;
+	esac
+done
+
+cmd=(nix develop -c zig build "-Doptimize=${optimize}")
+if (( run_tests != 0 )); then
+	cmd+=(test)
+fi
+
+"${cmd[@]}"

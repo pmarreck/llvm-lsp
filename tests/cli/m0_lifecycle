@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+source "$HOME/dotfiles/bin/src/capture.bash"
+
+fail=0
+
+assert_eq() {
+	local actual="$1"
+	local expected="$2"
+	local message="$3"
+	if [[ "$actual" != "$expected" ]]; then
+		echo "FAIL: $message" >&2
+		echo "  expected: [$expected]" >&2
+		echo "  actual:   [$actual]" >&2
+		fail=1
+	fi
+}
+
+assert_contains() {
+	local haystack="$1"
+	local needle="$2"
+	local message="$3"
+	if [[ "$haystack" != *"$needle"* ]]; then
+		echo "FAIL: $message" >&2
+		echo "  missing: [$needle]" >&2
+		echo "  actual:  [$haystack]" >&2
+		fail=1
+	fi
+}
+
+assert_not_contains() {
+	local haystack="$1"
+	local needle="$2"
+	local message="$3"
+	if [[ "$haystack" == *"$needle"* ]]; then
+		echo "FAIL: $message" >&2
+		echo "  unexpected: [$needle]" >&2
+		echo "  actual:     [$haystack]" >&2
+		fail=1
+	fi
+}
+
+run_release_eof_test() {
+	local out err rc
+	capture bash -c './build >/dev/null && printf "" | ./zig-out/bin/llvm-lsp'
+	assert_eq "$rc" "0" "release build EOF run exits cleanly"
+	assert_eq "$out" "" "release build EOF run writes no stdout"
+	assert_not_contains "$err" "DEBUG BUILD" "release build must not print debug banner"
+}
+
+run_debug_eof_test() {
+	local out err rc
+	capture bash -c './build --debug >/dev/null && printf "" | ./zig-out/bin/llvm-lsp'
+	assert_eq "$rc" "0" "debug build EOF run exits cleanly"
+	assert_eq "$out" "" "debug build EOF run writes no stdout"
+	assert_contains "$err" "DEBUG BUILD" "debug build must print debug banner to stderr"
+}
+
+run_initialize_test() {
+	local out err rc
+	capture bash -c 'payload='"'"'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'"'"'; len=${#payload}; ./build >/dev/null && printf "Content-Length: %s\r\n\r\n%s" "$len" "$payload" | ./zig-out/bin/llvm-lsp'
+	assert_eq "$rc" "0" "initialize request exits cleanly on EOF"
+	assert_contains "$out" "Content-Length:" "initialize response has LSP framing"
+	assert_contains "$out" '"id":1' "initialize response preserves request id"
+	assert_contains "$out" '"capabilities"' "initialize response includes capabilities"
+	assert_not_contains "$err" "DEBUG BUILD" "release initialize run should not emit debug banner"
+}
+
+run_shutdown_exit_flow_test() {
+	local out err rc
+	capture bash -c 's='"'"'{"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}'"'"'; e='"'"'{"jsonrpc":"2.0","method":"exit","params":null}'"'"'; ls=${#s}; le=${#e}; ./build >/dev/null && { printf "Content-Length: %s\r\n\r\n%s" "$ls" "$s"; printf "Content-Length: %s\r\n\r\n%s" "$le" "$e"; } | ./zig-out/bin/llvm-lsp'
+	assert_eq "$rc" "0" "shutdown then exit returns code 0"
+	assert_contains "$out" '"id":2' "shutdown response keeps id"
+	assert_not_contains "$err" "DEBUG BUILD" "release shutdown/exit run should not emit debug banner"
+}
+
+run_exit_without_shutdown_test() {
+	local out err rc
+	capture bash -c 'e='"'"'{"jsonrpc":"2.0","method":"exit","params":null}'"'"'; le=${#e}; ./build >/dev/null && printf "Content-Length: %s\r\n\r\n%s" "$le" "$e" | ./zig-out/bin/llvm-lsp'
+	assert_eq "$rc" "1" "exit without shutdown returns code 1"
+	assert_eq "$out" "" "exit without shutdown should not write stdout response"
+	assert_not_contains "$err" "DEBUG BUILD" "release exit-only run should not emit debug banner"
+}
+
+run_release_eof_test
+run_debug_eof_test
+run_initialize_test
+run_shutdown_exit_flow_test
+run_exit_without_shutdown_test
+
+if (( fail != 0 )); then
+	exit 1
+fi
