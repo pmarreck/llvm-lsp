@@ -180,9 +180,26 @@ fn parseParamDefinitions(index: *symbols.Index, line: []const u8, line_no: usize
 			cursor += 1;
 			continue;
 		};
+		if (!isParameterNamePosition(params, cursor)) {
+			cursor = token.next_index;
+			continue;
+		}
 		try index.addSymbol(.param, token.token, line_no, function_name);
 		cursor = token.next_index;
 	}
+}
+
+fn isParameterNamePosition(params: []const u8, token_start: usize) bool {
+	var cursor = token_start;
+	while (cursor > 0) {
+		const c = params[cursor - 1];
+		if (c == ' ' or c == '\t') {
+			cursor -= 1;
+			continue;
+		}
+		return c != '(' and c != ',' and c != '[' and c != '{';
+	}
+	return false;
 }
 
 fn collectSignatureParamReferences(index: *symbols.Index, line: []const u8, line_no: usize) !void {
@@ -463,4 +480,22 @@ test "parser collects branch label references as labels" {
 	try std.testing.expectEqual(@as(usize, 1), index.countReferences("then", "@f"));
 	try std.testing.expectEqual(@as(usize, 1), index.countReferences("else", "@f"));
 	try std.testing.expectEqual(@as(usize, 2), index.countReferences("exit", "@f"));
+}
+
+test "parser does not treat type aliases in signatures as parameter definitions" {
+	const source =
+		"%S = type { i32 }\n" ++
+		"declare fastcc void @consume(%S* %arg, i32 %n) #0\n" ++
+		"define fastcc void @run(%S* %item) #0 {\n" ++
+		"entry:\n" ++
+		"  call fastcc void @consume(%S* %item, i32 1)\n" ++
+		"  ret void\n" ++
+		"}\n";
+
+	var index = try parseModule(std.testing.allocator, source);
+	defer index.deinit();
+
+	try std.testing.expect(index.hasDefinition(.type_alias, "%S", null, 1));
+	try std.testing.expect(index.hasDefinition(.param, "%item", "@run", 3));
+	try std.testing.expect(!index.hasDefinition(.param, "%S", "@run", 3));
 }

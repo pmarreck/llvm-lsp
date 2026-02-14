@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+source "$HOME/dotfiles/bin/src/capture.bash"
+
+fail=0
+
+assert_eq() {
+	local actual="$1"
+	local expected="$2"
+	local message="$3"
+	if [[ "$actual" != "$expected" ]]; then
+		echo "FAIL: $message" >&2
+		echo "  expected: [$expected]" >&2
+		echo "  actual:   [$actual]" >&2
+		fail=1
+	fi
+}
+
+assert_contains() {
+	local haystack="$1"
+	local needle="$2"
+	local message="$3"
+	if [[ "$haystack" != *"$needle"* ]]; then
+		echo "FAIL: $message" >&2
+		echo "  missing: [$needle]" >&2
+		echo "  actual:  [$haystack]" >&2
+		fail=1
+	fi
+}
+
+run_document_symbol_fidelity_test() {
+	local out err rc
+	capture bash -c '
+		./build >/dev/null
+		uri="file:///tmp/docsym.ll"
+		source="%struct.Foo = type { i32 }\n@g = global i32 0\n!0 = !{i32 1}\n!llvm.module.flags = !{!0}\ndefine i32 @main(i32 %argc) {\nentry:\n  ret i32 0\n}\n"
+		m1="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"
+		m2="{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\",\"text\":\"${source}\"}}}"
+		m3="{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/documentSymbol\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"}}}"
+		s="{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"shutdown\",\"params\":null}"
+		e="{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":null}"
+		{
+			for msg in "$m1" "$m2" "$m3" "$s" "$e"; do
+				printf "Content-Length: %s\r\n\r\n%s" "${#msg}" "$msg"
+			done
+		} | ./zig-out/bin/llvm-lsp
+	'
+
+	assert_eq "$rc" "0" "documentSymbol flow should exit cleanly"
+	assert_contains "$out" '"id":2' "documentSymbol response should be present"
+	assert_contains "$out" '"name":"%struct.Foo","kind":23' "documentSymbol should include type aliases"
+	assert_contains "$out" '"name":"@g","kind":13' "documentSymbol should include globals"
+	assert_contains "$out" '"name":"@main","kind":12' "documentSymbol should include functions"
+	assert_contains "$out" '"name":"!0","kind":19' "documentSymbol should include metadata nodes"
+	assert_contains "$out" '"name":"!llvm.module.flags","kind":19' "documentSymbol should include named metadata labels"
+	assert_contains "$out" '"name":"@main","kind":12,"range":{"start":{"line":4,"character":0},"end":{"line":4,"character":29}},"selectionRange":{"start":{"line":4,"character":11},"end":{"line":4,"character":16}}' "function symbol should use full-line range and token selection range"
+}
+
+run_document_symbol_fidelity_test
+
+if (( fail != 0 )); then
+	exit 1
+fi

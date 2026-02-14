@@ -341,10 +341,17 @@ fn handleDocumentSymbol(allocator: std.mem.Allocator, documents: *std.StringHash
 			.function_def, .function_decl => @as(u8, 12),
 			.global => @as(u8, 13),
 			.type_alias => @as(u8, 23),
+			.metadata => @as(u8, 19),
 			else => null,
 		};
 		if (kind_value_opt == null) continue;
 		const kind_value = kind_value_opt.?;
+		const line_index = if (symbol.line == 0) 0 else symbol.line - 1;
+		const line_text = getLineAt(doc.source, line_index) orelse "";
+		const trimmed_line = std.mem.trim(u8, line_text, " \t\r");
+		const range_end = trimmed_line.len;
+		const selection_start = findSelectionStartInLine(line_text, symbol.name) orelse 0;
+		const selection_end = selection_start + symbol.name.len;
 
 		if (wrote_any) {
 			try out.appendSlice(allocator, ",");
@@ -353,16 +360,17 @@ fn handleDocumentSymbol(allocator: std.mem.Allocator, documents: *std.StringHash
 
 		const piece = try std.fmt.allocPrint(
 			allocator,
-			"{{\"name\":\"{s}\",\"kind\":{d},\"range\":{{\"start\":{{\"line\":{d},\"character\":0}},\"end\":{{\"line\":{d},\"character\":{d}}}}},\"selectionRange\":{{\"start\":{{\"line\":{d},\"character\":0}},\"end\":{{\"line\":{d},\"character\":{d}}}}}}}",
+			"{{\"name\":\"{s}\",\"kind\":{d},\"range\":{{\"start\":{{\"line\":{d},\"character\":0}},\"end\":{{\"line\":{d},\"character\":{d}}}}},\"selectionRange\":{{\"start\":{{\"line\":{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}}}}",
 			.{
 				symbol.name,
 				kind_value,
-				symbol.line - 1,
-				symbol.line - 1,
-				symbol.name.len,
-				symbol.line - 1,
-				symbol.line - 1,
-				symbol.name.len,
+				line_index,
+				line_index,
+				range_end,
+				line_index,
+				selection_start,
+				line_index,
+				selection_end,
 			},
 		);
 		defer allocator.free(piece);
@@ -933,6 +941,10 @@ fn getLineAt(source: []const u8, line_index: usize) ?[]const u8 {
 		i += 1;
 	}
 	return null;
+}
+
+fn findSelectionStartInLine(line: []const u8, token: []const u8) ?usize {
+	return std.mem.indexOf(u8, line, token);
 }
 
 fn parsePrefixedTokenAt(line: []const u8, start: usize) ?ParseToken {

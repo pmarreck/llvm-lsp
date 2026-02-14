@@ -22,7 +22,7 @@
 - [x] Implement minimal parser changes to satisfy new coverage tests while preserving existing behavior. (completed 2026-02-14 15:27 EST)
 - [x] Re-run full suite and build matrix after parser coverage increment. (completed 2026-02-14 15:29 EST)
 - [x] Update `CODE_MINIMAP.md` for new parser behaviors/tests. (completed 2026-02-14 15:32 EST)
-- [ ] Add failing tests for attributes/calling conventions/complex constants and extend parser accordingly.
+- [x] Add failing tests for attributes/calling conventions/complex constants and extend parser accordingly. (completed 2026-02-14 16:39 EST; signature type-alias-vs-param parsing fixed for calling-convention forms)
 - [x] Add failing tests for metadata edge forms (`distinct`, nested tuples, named metadata refs) and extend parser accordingly. (completed 2026-02-14 15:35 EST; multiline `distinct` references covered)
 - [x] Add failing tests for instruction-level reference extraction beyond `%/@/!` token scanning (labels, inline asm edge cases). (completed 2026-02-14 16:05 EST; branch label references covered)
 - [x] Add failing test for type-alias references in `declare`/`define` signatures and implement support. (completed 2026-02-14 15:33 EST)
@@ -30,7 +30,6 @@
 - [x] Add end-to-end assist tests (`hover`, completion for `@/%/!`, opcode/type context completions) and implement handlers. (completed 2026-02-14 16:58 EST)
 - [x] Add diagnostics integration tests and implement `publishDiagnostics` for undefined locals and missing terminators. (completed 2026-02-14 16:53 EST)
 - [x] Add document lifecycle integration test for `didChange` reparse and `didClose` invalidation semantics. (completed 2026-02-14 16:46 EST)
-- [ ] Add failing tests for parser duplicate-symbol diagnostics and implement duplicate-definition reporting.
 - [x] Add failing tests for parser duplicate-symbol diagnostics and implement duplicate-definition reporting. (completed 2026-02-14 16:06 EST)
 - [x] Add failing tests for opcode-hover descriptions and implement instruction hover docs. (completed 2026-02-14 16:12 EST)
 - [x] Add failing tests for completion in `br label %` context and implement label completions by function scope. (completed 2026-02-14 16:12 EST)
@@ -38,7 +37,7 @@
 - [x] Add failing tests for type-mismatch diagnostics and implement minimal operand-type checks. (completed 2026-02-14 16:25 EST)
 - [x] Add failing tests for LSP unknown-method and malformed-request error bodies across all request paths. (completed 2026-02-14 16:29 EST)
 - [x] Add failing tests for richer hover on locals/globals (type + defining instruction snippets) and improve hover content formatting. (completed 2026-02-14 16:35 EST)
-- [ ] Add failing tests for `documentSymbol` kind/range fidelity against more diverse LLVM IR constructs.
+- [x] Add failing tests for `documentSymbol` kind/range fidelity against more diverse LLVM IR constructs. (completed 2026-02-14 16:39 EST; metadata symbols + token-aware selection ranges)
 
 ## Curiosity Pokes To Revisit
 - Clarify whether `references` should include declaration by default.

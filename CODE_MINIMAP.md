@@ -27,6 +27,7 @@
 - LSP server runtime and transport implementation.
 - Handles framing/lifecycle (`initialize`, `initialized`, `shutdown`, `exit`), plus `didOpen`/`didChange`/`didClose`.
 - Implements `definition`, `references`, `documentSymbol`, `hover`, and `completion` request handlers.
+- `documentSymbol` emits functions/globals/type aliases/metadata with full-line `range` and token-specific `selectionRange`.
 - Implements symbol hover with defining-line context snippets plus opcode-keyword hover fallback (`ret`, `br`, `add`, etc.) when no symbol token is under cursor.
 - Implements completion contexts for symbol prefixes (`@`, `%`, `!`), opcode suggestions after `= `, type suggestions after opcode+space, and label suggestions in `br label %` context.
 - Publishes diagnostics notifications for parse errors (heuristic malformed tokens), undefined locals, duplicate definitions, missing terminators, and minimal `add i32` type-mismatch warnings after open/change; clears diagnostics on close.
@@ -43,6 +44,7 @@
 `src/core/parser.zig`
 - Minimal LLVM IR text parser spike for top-level/module/function-local symbol extraction.
 - Parses type aliases, globals, metadata defs, function decl/defs, params, labels, local defs, and operand references with per-function scoping.
+- Avoids misclassifying signature type-alias tokens as parameter definitions in calling-convention-heavy signatures.
 - Collects top-level RHS references for global/type/metadata assignment lines.
 - Collects top-level parameter-signature references from both `declare` and `define` lines.
 - Tracks multiline metadata blocks (e.g., `distinct !{ ... }`) to collect continuation-line references.
@@ -81,6 +83,10 @@
 `tests/cli/lsp_errors`
 - Integration test for JSON-RPC error handling paths.
 - Verifies `-32601` for unknown methods and `-32600` for malformed requests missing `method`.
+
+`tests/cli/lsp_document_symbol_fidelity`
+- Integration test for richer `documentSymbol` behavior.
+- Verifies metadata symbol inclusion and line/token range fidelity for emitted symbols.
 
 `flake.nix`
 - Nix flake defining project development shell and default package build.
