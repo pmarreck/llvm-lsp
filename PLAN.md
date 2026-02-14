@@ -25,6 +25,7 @@
 - [ ] Add failing tests for attributes/calling conventions/complex constants and extend parser accordingly.
 - [ ] Add failing tests for metadata edge forms (`distinct`, nested tuples, named metadata refs) and extend parser accordingly.
 - [ ] Add failing tests for instruction-level reference extraction beyond `%/@/!` token scanning (labels, inline asm edge cases).
+- [x] Add failing test for type-alias references in `declare`/`define` signatures and implement support. (completed 2026-02-14 15:40 EST)
 
 ## Curiosity Pokes To Revisit
 - Clarify whether `references` should include declaration by default.

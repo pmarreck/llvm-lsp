@@ -37,6 +37,7 @@ pub fn parseModule(allocator: std.mem.Allocator, source: []const u8) !symbols.In
 			if (std.mem.startsWith(u8, trimmed, "declare ")) {
 				const fn_name = parseNameAfterPrefix(trimmed, '@') orelse continue;
 				try index.addSymbol(.function_decl, fn_name, line_no, null);
+				try collectSignatureParamReferences(&index, trimmed, line_no);
 				continue;
 			}
 
@@ -44,6 +45,7 @@ pub fn parseModule(allocator: std.mem.Allocator, source: []const u8) !symbols.In
 				const fn_name = parseNameAfterPrefix(trimmed, '@') orelse continue;
 				try index.addSymbol(.function_def, fn_name, line_no, null);
 				try parseParamDefinitions(&index, trimmed, line_no, fn_name);
+				try collectSignatureParamReferences(&index, trimmed, line_no);
 				current_function = fn_name;
 				continue;
 			}
@@ -169,6 +171,14 @@ fn parseParamDefinitions(index: *symbols.Index, line: []const u8, line_no: usize
 	}
 }
 
+fn collectSignatureParamReferences(index: *symbols.Index, line: []const u8, line_no: usize) !void {
+	const open = std.mem.indexOfScalar(u8, line, '(') orelse return;
+	const close = std.mem.lastIndexOfScalar(u8, line, ')') orelse return;
+	if (close <= open + 1) return;
+	const params = line[open + 1 .. close];
+	try collectReferences(index, params, line_no, null);
+}
+
 fn collectReferences(index: *symbols.Index, line: []const u8, line_no: usize, function_name: ?[]const u8) !void {
 	var cursor: usize = 0;
 	while (cursor < line.len) {
@@ -287,4 +297,22 @@ test "parser handles quoted identifiers with escaped quotes" {
 	try std.testing.expect(index.hasDefinition(.param, "%\"arg\\\"name\"", "@\"fun\\\"name\"", 1));
 	try std.testing.expect(index.hasDefinition(.local, "%\"tmp\\\"id\"", "@\"fun\\\"name\"", 3));
 	try std.testing.expectEqual(@as(usize, 1), index.countReferences("%\"tmp\\\"id\"", "@\"fun\\\"name\""));
+}
+
+test "parser collects type references from declare and define signatures" {
+	const source =
+		"%struct.Foo = type { i32 }\n" ++
+		"declare void @consume(ptr %struct.Foo)\n" ++
+		"define void @run(ptr %struct.Foo) {\n" ++
+		"entry:\n" ++
+		"  call void @consume(ptr null)\n" ++
+		"  ret void\n" ++
+		"}\n";
+
+	var index = try parseModule(std.testing.allocator, source);
+	defer index.deinit();
+
+	try std.testing.expect(index.hasDefinition(.type_alias, "%struct.Foo", null, 1));
+	try std.testing.expectEqual(@as(usize, 2), index.countReferences("%struct.Foo", null));
+	try std.testing.expectEqual(@as(usize, 1), index.countReferences("@consume", "@run"));
 }
