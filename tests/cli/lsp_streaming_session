@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+fail=0
+
+assert_eq() {
+	local actual="$1"
+	local expected="$2"
+	local message="$3"
+	if [[ "$actual" != "$expected" ]]; then
+		echo "FAIL: $message" >&2
+		echo "  expected: [$expected]" >&2
+		echo "  actual:   [$actual]" >&2
+		fail=1
+	fi
+}
+
+run_streaming_initialize_test() {
+	./build >/dev/null
+
+	coproc LSP { ./zig-out/bin/llvm-lsp; }
+	local lsp_pid="$LSP_PID"
+	local lsp_in="${LSP[1]}"
+	local lsp_out="${LSP[0]}"
+
+	local init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+	printf "Content-Length: %s\r\n\r\n%s" "${#init}" "$init" >&"$lsp_in"
+
+	# The server must respond without requiring stdin to close (interactive LSP).
+	gtimeout 2s dd bs=1 count=1 status=none <&"$lsp_out" >/dev/null
+	local rc="$?"
+	assert_eq "$rc" "0" "server should stream initialize response before stdin closes"
+
+	local shutdown='{"jsonrpc":"2.0","id":9,"method":"shutdown","params":null}'
+	local exit_msg='{"jsonrpc":"2.0","method":"exit","params":null}'
+	printf "Content-Length: %s\r\n\r\n%s" "${#shutdown}" "$shutdown" >&"$lsp_in"
+	printf "Content-Length: %s\r\n\r\n%s" "${#exit_msg}" "$exit_msg" >&"$lsp_in"
+
+	exec {lsp_in}>&-
+	wait "$lsp_pid" || true
+}
+
+run_streaming_initialize_test
+
+if (( fail != 0 )); then
+	exit 1
+fi

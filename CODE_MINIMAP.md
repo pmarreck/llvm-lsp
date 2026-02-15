@@ -35,13 +35,15 @@
 `src/server.zig`
 - LSP runtime and request-dispatch engine over JSON-RPC/LSP.
 - Handles lifecycle (`initialize`, `initialized`, `shutdown`, `exit`) and document sync (`didOpen`, `didChange`, `didClose`).
-- Implements `definition`, `references`, `documentSymbol`, `hover`, and `completion`.
-- Uses bounded session reads and delegates framing/JSON-RPC envelope work to `src/transport.zig`.
+- Implements `definition`, `references`, `documentSymbol`, `hover`, `completion`, and `rename`.
+- Processes stdio incrementally as a live session (responds before stdin EOF), while keeping bounded input buffering.
+- Uses bounded session buffering and delegates framing/JSON-RPC envelope work to `src/transport.zig`.
 - Delegates diagnostics payload generation to `src/core/diagnostics.zig`.
 
 `src/transport.zig`
 - LSP stdio transport helpers.
 - Parses `Content-Length` frames with 10MB message cap and writes framed JSON-RPC responses/notifications/errors.
+- Distinguishes incomplete frames for streaming accumulation and flushes each framed write for interactive clients.
 
 `src/tests.zig`
 - Unit test entrypoint imported by `zig build test`.
@@ -112,6 +114,14 @@
 `tests/cli/lsp_large_file_stress`
 - Large-file integration test.
 - Verifies multi-megabyte `didOpen` + `didChange` full-sync flow and post-change `definition` resolution.
+
+`tests/cli/lsp_streaming_session`
+- Interactive stdio session test.
+- Verifies initialize response is emitted while stdin remains open (streaming LSP behavior).
+
+`tests/cli/lsp_rename`
+- Rename integration test.
+- Verifies `textDocument/rename` returns workspace edits with replacement text for LLVM IR locals.
 
 `flake.nix`
 - Nix flake defining project development shell and default package build.

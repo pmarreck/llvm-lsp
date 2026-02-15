@@ -43,176 +43,232 @@ const ParseToken = struct {
 pub fn run(allocator: std.mem.Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer) !u8 {
 	_ = stderr;
 
-	const input = try std.fs.File.stdin().readToEndAlloc(allocator, max_session_bytes);
-	defer allocator.free(input);
-
 	var documents: std.StringHashMapUnmanaged(Document) = .{};
 	defer deinitDocuments(allocator, &documents);
 
-	if (input.len == 0) {
-		return 0;
-	}
-
 	var saw_shutdown = false;
-	var index: usize = 0;
+	var parse_index: usize = 0;
+	var saw_eof = false;
+	var pending: std.ArrayListUnmanaged(u8) = .{};
+	defer pending.deinit(allocator);
+
+	var stdin_buffer: [4096]u8 = undefined;
+	var stdin_file_reader = std.fs.File.stdin().readerStreaming(&stdin_buffer);
+	const stdin = &stdin_file_reader.interface;
+
 	while (true) {
-		const body_opt = transport.parseNextFrame(input, &index) catch |err| {
-			const message = switch (err) {
-				error.InvalidCharacter, error.Overflow, error.MissingContentLength, error.InvalidFrame, error.TruncatedBody, error.MessageTooLarge => "invalid request framing",
+		while (true) {
+			const body_opt = transport.parseNextFrame(pending.items, &parse_index) catch |err| {
+				switch (err) {
+					error.IncompleteFrame => break,
+					error.InvalidCharacter, error.Overflow, error.MissingContentLength, error.MessageTooLarge => {
+						try transport.writeJsonRpcError(stdout, null, -32600, "invalid request framing");
+						return 1;
+					},
+				}
 			};
-			try transport.writeJsonRpcError(stdout, null, -32600, message);
-			return 1;
-		};
-		if (body_opt == null) {
-			break;
+			if (body_opt == null) {
+				break;
+			}
+			const body = body_opt.?;
+			if (try processMessage(allocator, stdout, &documents, body, &saw_shutdown)) |exit_code| {
+				return exit_code;
+			}
 		}
 
-		const body = body_opt.?;
-		var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch {
-			try transport.writeJsonRpcError(stdout, null, -32700, "parse error");
-			continue;
-		};
-		defer parsed.deinit();
+		if (parse_index > 0) {
+			const remaining_len = pending.items.len - parse_index;
+			if (remaining_len > 0) {
+				std.mem.copyForwards(u8, pending.items[0..remaining_len], pending.items[parse_index..]);
+			}
+			pending.items.len = remaining_len;
+			parse_index = 0;
+		}
 
-		const root = parsed.value;
-		const request_id = getRequestId(root);
-		const method = getMethod(root) orelse {
+		if (saw_eof) {
+			if (pending.items.len != 0) {
+				try transport.writeJsonRpcError(stdout, null, -32600, "invalid request framing");
+				return 1;
+			}
+			return 0;
+		}
+
+		const byte = stdin.takeByte() catch |err| switch (err) {
+			error.EndOfStream => {
+				saw_eof = true;
+				continue;
+			},
+			else => return err,
+		};
+		if (pending.items.len + 1 > max_session_bytes) {
+			try transport.writeJsonRpcError(stdout, null, -32600, "invalid request framing");
+			return 1;
+		}
+		try pending.append(allocator, byte);
+	}
+}
+
+fn processMessage(
+	allocator: std.mem.Allocator,
+	stdout: *std.Io.Writer,
+	documents: *std.StringHashMapUnmanaged(Document),
+	body: []const u8,
+	saw_shutdown: *bool,
+) !?u8 {
+	var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch {
+		try transport.writeJsonRpcError(stdout, null, -32700, "parse error");
+		return null;
+	};
+	defer parsed.deinit();
+
+	const root = parsed.value;
+	const request_id = getRequestId(root);
+	const method = getMethod(root) orelse {
+		if (request_id != null) {
+			try transport.writeJsonRpcError(stdout, request_id, -32600, "invalid request");
+		}
+		return null;
+	};
+
+	if (std.mem.eql(u8, method, "initialize")) {
+		const id = request_id orelse return null;
+		try transport.writeJsonRpcResult(
+			allocator,
+			stdout,
+			id,
+			"{\"capabilities\":{\"definitionProvider\":true,\"referencesProvider\":true,\"documentSymbolProvider\":true,\"hoverProvider\":true,\"renameProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\"@\",\"%\",\"!\"]},\"textDocumentSync\":1}}",
+		);
+		return null;
+	}
+
+	if (std.mem.eql(u8, method, "initialized")) {
+		return null;
+	}
+
+	if (std.mem.eql(u8, method, "textDocument/didOpen")) {
+		handleDidOpen(allocator, documents, root) catch {
 			if (request_id != null) {
 				try transport.writeJsonRpcError(stdout, request_id, -32600, "invalid request");
 			}
-			continue;
+			return null;
 		};
-
-		if (std.mem.eql(u8, method, "initialize")) {
-			const id = request_id orelse continue;
-			try transport.writeJsonRpcResult(
-				allocator,
-				stdout,
-				id,
-				"{\"capabilities\":{\"definitionProvider\":true,\"referencesProvider\":true,\"documentSymbolProvider\":true,\"hoverProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\"@\",\"%\",\"!\"]},\"textDocumentSync\":1}}",
-			);
-			continue;
-		}
-
-		if (std.mem.eql(u8, method, "initialized")) {
-			continue;
-		}
-
-		if (std.mem.eql(u8, method, "textDocument/didOpen")) {
-			handleDidOpen(allocator, &documents, root) catch {
-				if (request_id != null) {
-					try transport.writeJsonRpcError(stdout, request_id, -32600, "invalid request");
-				}
-				continue;
-			};
-			try publishDiagnosticsForRequest(allocator, stdout, &documents, root);
-			continue;
-		}
-
-		if (std.mem.eql(u8, method, "textDocument/didChange")) {
-			handleDidChange(allocator, &documents, root) catch {
-				if (request_id != null) {
-					try transport.writeJsonRpcError(stdout, request_id, -32600, "invalid request");
-				}
-				continue;
-			};
-			try publishDiagnosticsForRequest(allocator, stdout, &documents, root);
-			continue;
-		}
-
-		if (std.mem.eql(u8, method, "textDocument/didClose")) {
-			const closed_uri = extractUriFromLifecycleRequest(root);
-			handleDidClose(allocator, &documents, root) catch {
-				if (request_id != null) {
-					try transport.writeJsonRpcError(stdout, request_id, -32600, "invalid request");
-				}
-				continue;
-			};
-			if (closed_uri) |uri| {
-				const params_json = try std.fmt.allocPrint(allocator, "{{\"uri\":\"{s}\",\"diagnostics\":[]}}", .{uri});
-				defer allocator.free(params_json);
-				try transport.writeJsonRpcNotification(
-					allocator,
-					stdout,
-					"textDocument/publishDiagnostics",
-					params_json,
-				);
-			}
-			continue;
-		}
-
-		if (std.mem.eql(u8, method, "textDocument/definition")) {
-			const id = request_id orelse continue;
-			const result = handleDefinition(allocator, &documents, root) catch {
-				try transport.writeJsonRpcError(stdout, id, -32600, "invalid request");
-				continue;
-			};
-			defer allocator.free(result);
-			try transport.writeJsonRpcResult(allocator, stdout, id, result);
-			continue;
-		}
-
-		if (std.mem.eql(u8, method, "textDocument/references")) {
-			const id = request_id orelse continue;
-			const result = handleReferences(allocator, &documents, root) catch {
-				try transport.writeJsonRpcError(stdout, id, -32600, "invalid request");
-				continue;
-			};
-			defer allocator.free(result);
-			try transport.writeJsonRpcResult(allocator, stdout, id, result);
-			continue;
-		}
-
-		if (std.mem.eql(u8, method, "textDocument/documentSymbol")) {
-			const id = request_id orelse continue;
-			const result = handleDocumentSymbol(allocator, &documents, root) catch {
-				try transport.writeJsonRpcError(stdout, id, -32600, "invalid request");
-				continue;
-			};
-			defer allocator.free(result);
-			try transport.writeJsonRpcResult(allocator, stdout, id, result);
-			continue;
-		}
-
-		if (std.mem.eql(u8, method, "textDocument/hover")) {
-			const id = request_id orelse continue;
-			const result = handleHover(allocator, &documents, root) catch {
-				try transport.writeJsonRpcError(stdout, id, -32600, "invalid request");
-				continue;
-			};
-			defer allocator.free(result);
-			try transport.writeJsonRpcResult(allocator, stdout, id, result);
-			continue;
-		}
-
-		if (std.mem.eql(u8, method, "textDocument/completion")) {
-			const id = request_id orelse continue;
-			const result = handleCompletion(allocator, &documents, root) catch {
-				try transport.writeJsonRpcError(stdout, id, -32600, "invalid request");
-				continue;
-			};
-			defer allocator.free(result);
-			try transport.writeJsonRpcResult(allocator, stdout, id, result);
-			continue;
-		}
-
-		if (std.mem.eql(u8, method, "shutdown")) {
-			saw_shutdown = true;
-			const id = request_id orelse continue;
-			try transport.writeJsonRpcResult(allocator, stdout, id, "null");
-			continue;
-		}
-
-		if (std.mem.eql(u8, method, "exit")) {
-			return if (saw_shutdown) 0 else 1;
-		}
-
-		if (request_id != null) {
-			try transport.writeJsonRpcError(stdout, request_id, -32601, "method not found");
-		}
+		try publishDiagnosticsForRequest(allocator, stdout, documents, root);
+		return null;
 	}
 
-	return 0;
+	if (std.mem.eql(u8, method, "textDocument/didChange")) {
+		handleDidChange(allocator, documents, root) catch {
+			if (request_id != null) {
+				try transport.writeJsonRpcError(stdout, request_id, -32600, "invalid request");
+			}
+			return null;
+		};
+		try publishDiagnosticsForRequest(allocator, stdout, documents, root);
+		return null;
+	}
+
+	if (std.mem.eql(u8, method, "textDocument/didClose")) {
+		const closed_uri = extractUriFromLifecycleRequest(root);
+		handleDidClose(allocator, documents, root) catch {
+			if (request_id != null) {
+				try transport.writeJsonRpcError(stdout, request_id, -32600, "invalid request");
+			}
+			return null;
+		};
+		if (closed_uri) |uri| {
+			const params_json = try std.fmt.allocPrint(allocator, "{{\"uri\":\"{s}\",\"diagnostics\":[]}}", .{uri});
+			defer allocator.free(params_json);
+			try transport.writeJsonRpcNotification(
+				allocator,
+				stdout,
+				"textDocument/publishDiagnostics",
+				params_json,
+			);
+		}
+		return null;
+	}
+
+	if (std.mem.eql(u8, method, "textDocument/definition")) {
+		const id = request_id orelse return null;
+		const result = handleDefinition(allocator, documents, root) catch {
+			try transport.writeJsonRpcError(stdout, id, -32600, "invalid request");
+			return null;
+		};
+		defer allocator.free(result);
+		try transport.writeJsonRpcResult(allocator, stdout, id, result);
+		return null;
+	}
+
+	if (std.mem.eql(u8, method, "textDocument/references")) {
+		const id = request_id orelse return null;
+		const result = handleReferences(allocator, documents, root) catch {
+			try transport.writeJsonRpcError(stdout, id, -32600, "invalid request");
+			return null;
+		};
+		defer allocator.free(result);
+		try transport.writeJsonRpcResult(allocator, stdout, id, result);
+		return null;
+	}
+
+	if (std.mem.eql(u8, method, "textDocument/documentSymbol")) {
+		const id = request_id orelse return null;
+		const result = handleDocumentSymbol(allocator, documents, root) catch {
+			try transport.writeJsonRpcError(stdout, id, -32600, "invalid request");
+			return null;
+		};
+		defer allocator.free(result);
+		try transport.writeJsonRpcResult(allocator, stdout, id, result);
+		return null;
+	}
+
+	if (std.mem.eql(u8, method, "textDocument/hover")) {
+		const id = request_id orelse return null;
+		const result = handleHover(allocator, documents, root) catch {
+			try transport.writeJsonRpcError(stdout, id, -32600, "invalid request");
+			return null;
+		};
+		defer allocator.free(result);
+		try transport.writeJsonRpcResult(allocator, stdout, id, result);
+		return null;
+	}
+
+	if (std.mem.eql(u8, method, "textDocument/completion")) {
+		const id = request_id orelse return null;
+		const result = handleCompletion(allocator, documents, root) catch {
+			try transport.writeJsonRpcError(stdout, id, -32600, "invalid request");
+			return null;
+		};
+		defer allocator.free(result);
+		try transport.writeJsonRpcResult(allocator, stdout, id, result);
+		return null;
+	}
+
+	if (std.mem.eql(u8, method, "textDocument/rename")) {
+		const id = request_id orelse return null;
+		const result = handleRename(allocator, documents, root) catch {
+			try transport.writeJsonRpcError(stdout, id, -32600, "invalid request");
+			return null;
+		};
+		defer allocator.free(result);
+		try transport.writeJsonRpcResult(allocator, stdout, id, result);
+		return null;
+	}
+
+	if (std.mem.eql(u8, method, "shutdown")) {
+		saw_shutdown.* = true;
+		const id = request_id orelse return null;
+		try transport.writeJsonRpcResult(allocator, stdout, id, "null");
+		return null;
+	}
+
+	if (std.mem.eql(u8, method, "exit")) {
+		return if (saw_shutdown.*) 0 else 1;
+	}
+
+	if (request_id != null) {
+		try transport.writeJsonRpcError(stdout, request_id, -32601, "method not found");
+	}
+	return null;
 }
 
 fn handleDidOpen(allocator: std.mem.Allocator, documents: *std.StringHashMapUnmanaged(Document), root: std.json.Value) !void {
@@ -527,6 +583,68 @@ fn handleCompletion(allocator: std.mem.Allocator, documents: *std.StringHashMapU
 	return try out.toOwnedSlice(allocator);
 }
 
+fn handleRename(allocator: std.mem.Allocator, documents: *std.StringHashMapUnmanaged(Document), root: std.json.Value) ![]u8 {
+	const params = getField(root, "params") orelse return error.InvalidRequest;
+	const text_document = getField(params, "textDocument") orelse return error.InvalidRequest;
+	const uri = getStringField(text_document, "uri") orelse return error.InvalidRequest;
+	const pos = parsePosition(params) orelse return error.InvalidRequest;
+	const new_name = getStringField(params, "newName") orelse return error.InvalidRequest;
+
+	const doc = documents.getPtr(uri) orelse return allocator.dupe(u8, "null");
+	const token = resolveTokenAt(doc.source, pos.line, pos.character) orelse return allocator.dupe(u8, "null");
+	const query = classifyQuery(doc, token) orelse return allocator.dupe(u8, "null");
+
+	var out: std.ArrayListUnmanaged(u8) = .{};
+	errdefer out.deinit(allocator);
+	try out.appendSlice(allocator, "{\"changes\":{\"");
+	try out.appendSlice(allocator, uri);
+	try out.appendSlice(allocator, "\":[");
+	var wrote_any = false;
+
+	if (findDefinitionSymbol(&doc.index, query)) |definition| {
+		const line_index = definition.line - 1;
+		const start = findTokenStartInLineForRename(doc.source, line_index, definition.name) orelse 0;
+		try appendRenameTextEditJson(allocator, &out, &wrote_any, line_index, start, start + definition.name.len, new_name);
+	}
+
+	for (doc.index.references.items) |reference| {
+		if (!std.mem.eql(u8, reference.name, query.name)) continue;
+		if (!scopeEqual(reference.scope_function, query.scope)) continue;
+		const line_index = reference.line - 1;
+		const start = findTokenStartInLineForRename(doc.source, line_index, reference.name) orelse 0;
+		try appendRenameTextEditJson(allocator, &out, &wrote_any, line_index, start, start + reference.name.len, new_name);
+	}
+
+	if (!wrote_any) {
+		return allocator.dupe(u8, "null");
+	}
+
+	try out.appendSlice(allocator, "]}}");
+	return try out.toOwnedSlice(allocator);
+}
+
+fn appendRenameTextEditJson(
+	allocator: std.mem.Allocator,
+	out: *std.ArrayListUnmanaged(u8),
+	wrote_any: *bool,
+	line_index: usize,
+	start: usize,
+	end: usize,
+	new_text: []const u8,
+) !void {
+	if (wrote_any.*) {
+		try out.appendSlice(allocator, ",");
+	}
+	wrote_any.* = true;
+	const piece = try std.fmt.allocPrint(
+		allocator,
+		"{{\"range\":{{\"start\":{{\"line\":{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}},\"newText\":\"{s}\"}}",
+		.{ line_index, start, line_index, end, new_text },
+	);
+	defer allocator.free(piece);
+	try out.appendSlice(allocator, piece);
+}
+
 fn appendStaticCompletions(allocator: std.mem.Allocator, labels: *std.StringHashMapUnmanaged(void), values: []const []const u8) !void {
 	for (values) |value| {
 		try labels.put(allocator, value, {});
@@ -751,6 +869,11 @@ fn getLineAt(source: []const u8, line_index: usize) ?[]const u8 {
 }
 
 fn findSelectionStartInLine(line: []const u8, token: []const u8) ?usize {
+	return std.mem.indexOf(u8, line, token);
+}
+
+fn findTokenStartInLineForRename(source: []const u8, line_index: usize, token: []const u8) ?usize {
+	const line = getLineAt(source, line_index) orelse return null;
 	return std.mem.indexOf(u8, line, token);
 }
 

@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+source "$HOME/dotfiles/bin/src/capture.bash"
+
+fail=0
+
+assert_eq() {
+	local actual="$1"
+	local expected="$2"
+	local message="$3"
+	if [[ "$actual" != "$expected" ]]; then
+		echo "FAIL: $message" >&2
+		echo "  expected: [$expected]" >&2
+		echo "  actual:   [$actual]" >&2
+		fail=1
+	fi
+}
+
+assert_contains() {
+	local haystack="$1"
+	local needle="$2"
+	local message="$3"
+	if [[ "$haystack" != *"$needle"* ]]; then
+		echo "FAIL: $message" >&2
+		echo "  missing: [$needle]" >&2
+		fail=1
+	fi
+}
+
+run_rename_flow_test() {
+	local out err rc
+	capture bash -c '
+		./build >/dev/null
+		uri="file:///tmp/rename.ll"
+		source="define i32 @main() {\nentry:\n  %needle = add i32 1, 2\n  %use = add i32 %needle, 1\n  ret i32 %use\n}\n"
+		m1="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"
+		m2="{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\",\"text\":\"${source}\"}}}"
+		m3="{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"${uri}\"},\"position\":{\"line\":2,\"character\":3},\"newName\":\"%renamed\"}}"
+		s="{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"shutdown\",\"params\":null}"
+		e="{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":null}"
+		{
+			for msg in "$m1" "$m2" "$m3" "$s" "$e"; do
+				printf "Content-Length: %s\r\n\r\n%s" "${#msg}" "$msg"
+			done
+		} | ./zig-out/bin/llvm-lsp
+	'
+
+	assert_eq "$rc" "0" "rename flow should exit cleanly"
+	assert_contains "$out" '"id":5' "rename response should be present"
+	assert_contains "$out" '"changes"' "rename response should return workspace edits"
+	assert_contains "$out" '"newText":"%renamed"' "rename response should include replacement text"
+}
+
+run_rename_flow_test
+
+if (( fail != 0 )); then
+	exit 1
+fi

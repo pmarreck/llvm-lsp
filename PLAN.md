@@ -43,6 +43,7 @@
 - [x] Add failing large-file stress test (multi-MB `didOpen` + `didChange` + `definition`) and raise session input cap to handle repeated large full-sync edits. (completed 2026-02-14 17:04 EST)
 - [x] Refactor architecture to split entrypoint/runtime/transport/diagnostics across `src/main.zig`, `src/server.zig`, `src/transport.zig`, and `src/core/diagnostics.zig` while preserving behavior. (completed 2026-02-14 17:11 EST)
 - [x] Fix GitHub Actions YAML indentation failure and switch Garnix to flake-only autodetect (no `garnix.yaml`). (completed 2026-02-14 17:11 EST)
+- [x] Add interactive streaming-session coverage and implement live stdio frame processing (no EOF gating), plus `textDocument/rename` support for `codescan` LSP workflows. (completed 2026-02-14 19:40 EST)
 
 ## Curiosity Pokes To Revisit
 - Clarify whether `references` should include declaration by default.

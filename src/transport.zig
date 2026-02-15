@@ -11,7 +11,7 @@ pub fn parseNextFrame(input: []const u8, index: *usize) !?[]const u8 {
 		return null;
 	}
 
-	const header_end = std.mem.indexOfPos(u8, input, index.*, "\r\n\r\n") orelse return error.InvalidFrame;
+	const header_end = std.mem.indexOfPos(u8, input, index.*, "\r\n\r\n") orelse return error.IncompleteFrame;
 	const header = input[index.*..header_end];
 
 	var content_length: ?usize = null;
@@ -31,7 +31,7 @@ pub fn parseNextFrame(input: []const u8, index: *usize) !?[]const u8 {
 	const body_start = header_end + 4;
 	const body_end = body_start + body_len;
 	if (body_end > input.len) {
-		return error.TruncatedBody;
+		return error.IncompleteFrame;
 	}
 
 	index.* = body_end;
@@ -41,6 +41,7 @@ pub fn parseNextFrame(input: []const u8, index: *usize) !?[]const u8 {
 pub fn writeFramed(stdout: *std.Io.Writer, body: []const u8) !void {
 	try stdout.print("Content-Length: {d}\r\n\r\n", .{body.len});
 	try stdout.writeAll(body);
+	try stdout.flush();
 }
 
 pub fn writeJsonRpcResult(allocator: std.mem.Allocator, stdout: *std.Io.Writer, id: i64, result_json: []const u8) !void {
