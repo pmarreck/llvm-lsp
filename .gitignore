@@ -3,3 +3,9 @@ zig-cache/
 .zig-cache/
 .cache/
 result
+.serena
+.serena/*
+inbox
+AGENTS.md
+ZIG_RECENT_API_CHANGES_2025.md
+jj_cheatsheet.md
