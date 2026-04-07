@@ -6,6 +6,7 @@ result
 .serena
 .serena/*
 inbox
+.DS_Store
 AGENTS.md
-ZIG_RECENT_API_CHANGES_2025.md
+ZIG_RECENT_API_CHANGES*
 jj_cheatsheet.md
