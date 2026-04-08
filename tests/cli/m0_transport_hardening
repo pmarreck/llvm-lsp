@@ -62,8 +62,18 @@ run_oversized_content_length_test() {
 }
 
 run_partial_header_no_hang_test() {
+	local timeout_cmd
+	if command -v gtimeout &>/dev/null; then
+		timeout_cmd=gtimeout
+	elif command -v timeout &>/dev/null; then
+		timeout_cmd=timeout
+	else
+		echo "FAIL: neither gtimeout nor timeout found" >&2
+		fail=1
+		return
+	fi
 	local out err rc
-	capture bash -c './build >/dev/null && gtimeout 2s bash -c "printf \"Content-Length: 5\" | ./zig-out/bin/llvm-lsp"'
+	capture bash -c "./build >/dev/null && $timeout_cmd 2s bash -c 'printf \"Content-Length: 5\" | ./zig-out/bin/llvm-lsp'"
 	assert_eq "$rc" "1" "partial header should terminate with non-zero"
 }
 
