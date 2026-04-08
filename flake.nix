@@ -15,6 +15,7 @@
           buildInputs = with pkgs; [
             zig
             zls
+            coreutils  # GNU timeout, etc. — ensures cross-platform CLI test compat
           ];
         };
 

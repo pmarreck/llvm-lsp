@@ -27,7 +27,17 @@ run_streaming_initialize_test() {
 	printf "Content-Length: %s\r\n\r\n%s" "${#init}" "$init" >&"$lsp_in"
 
 	# The server must respond without requiring stdin to close (interactive LSP).
-	gtimeout 2s dd bs=1 count=1 status=none <&"$lsp_out" >/dev/null
+	# Use gtimeout (macOS/Homebrew) or timeout (Linux/GNU coreutils)
+	local timeout_cmd
+	if command -v gtimeout &>/dev/null; then
+		timeout_cmd=gtimeout
+	elif command -v timeout &>/dev/null; then
+		timeout_cmd=timeout
+	else
+		echo "FAIL: neither gtimeout nor timeout found" >&2
+		return 1
+	fi
+	$timeout_cmd 2s dd bs=1 count=1 status=none <&"$lsp_out" >/dev/null
 	local rc="$?"
 	assert_eq "$rc" "0" "server should stream initialize response before stdin closes"
 
