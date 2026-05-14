@@ -40,20 +40,20 @@ const ParseToken = struct {
 	next_index: usize,
 };
 
-pub fn run(allocator: std.mem.Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer) !u8 {
+pub fn run(io: std.Io, allocator: std.mem.Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer) !u8 {
 	_ = stderr;
 
-	var documents: std.StringHashMapUnmanaged(Document) = .{};
+	var documents: std.StringHashMapUnmanaged(Document) = .empty;
 	defer deinitDocuments(allocator, &documents);
 
 	var saw_shutdown = false;
 	var parse_index: usize = 0;
 	var saw_eof = false;
-	var pending: std.ArrayListUnmanaged(u8) = .{};
+	var pending: std.ArrayListUnmanaged(u8) = .empty;
 	defer pending.deinit(allocator);
 
 	var stdin_buffer: [4096]u8 = undefined;
-	var stdin_file_reader = std.fs.File.stdin().readerStreaming(&stdin_buffer);
+	var stdin_file_reader = std.Io.File.stdin().reader(io, &stdin_buffer);
 	const stdin = &stdin_file_reader.interface;
 
 	while (true) {
@@ -333,7 +333,7 @@ fn handleReferences(allocator: std.mem.Allocator, documents: *std.StringHashMapU
 	const token = resolveTokenAt(doc.source, pos.line, pos.character) orelse return allocator.dupe(u8, "[]");
 	const query = classifyQuery(doc, token) orelse return allocator.dupe(u8, "[]");
 
-	var out: std.ArrayListUnmanaged(u8) = .{};
+	var out: std.ArrayListUnmanaged(u8) = .empty;
 	errdefer out.deinit(allocator);
 	try out.appendSlice(allocator, "[");
 	var wrote_any = false;
@@ -360,7 +360,7 @@ fn handleDocumentSymbol(allocator: std.mem.Allocator, documents: *std.StringHash
 	const uri = getStringField(text_document, "uri") orelse return error.InvalidRequest;
 	const doc = documents.getPtr(uri) orelse return allocator.dupe(u8, "[]");
 
-	var out: std.ArrayListUnmanaged(u8) = .{};
+	var out: std.ArrayListUnmanaged(u8) = .empty;
 	errdefer out.deinit(allocator);
 	try out.appendSlice(allocator, "[");
 	var wrote_any = false;
@@ -482,7 +482,7 @@ fn handleCompletion(allocator: std.mem.Allocator, documents: *std.StringHashMapU
 	if (pos.character == 0 or pos.character > line.len) return allocator.dupe(u8, "[]");
 
 	const trigger = line[pos.character - 1];
-	var labels: std.StringHashMapUnmanaged(void) = .{};
+	var labels: std.StringHashMapUnmanaged(void) = .empty;
 	defer labels.deinit(allocator);
 
 	const scope = inferFunctionScopeForLine(&doc.index, pos.line + 1);
@@ -559,7 +559,7 @@ fn handleCompletion(allocator: std.mem.Allocator, documents: *std.StringHashMapU
 		}
 	}
 
-	var out: std.ArrayListUnmanaged(u8) = .{};
+	var out: std.ArrayListUnmanaged(u8) = .empty;
 	errdefer out.deinit(allocator);
 	try out.appendSlice(allocator, "[");
 	var wrote_any = false;
@@ -594,7 +594,7 @@ fn handleRename(allocator: std.mem.Allocator, documents: *std.StringHashMapUnman
 	const token = resolveTokenAt(doc.source, pos.line, pos.character) orelse return allocator.dupe(u8, "null");
 	const query = classifyQuery(doc, token) orelse return allocator.dupe(u8, "null");
 
-	var out: std.ArrayListUnmanaged(u8) = .{};
+	var out: std.ArrayListUnmanaged(u8) = .empty;
 	errdefer out.deinit(allocator);
 	try out.appendSlice(allocator, "{\"changes\":{\"");
 	try out.appendSlice(allocator, uri);
@@ -820,7 +820,7 @@ fn inferFunctionScopeForLine(index: *const symbols.Index, line_number_1: usize) 
 
 fn isLabelContext(line: []const u8, token_start: usize) bool {
 	if (token_start == 0) return false;
-	const prefix = std.mem.trimRight(u8, line[0..token_start], " \t,");
+	const prefix = std.mem.trimEnd(u8, line[0..token_start], " \t,");
 	return std.mem.endsWith(u8, prefix, "label");
 }
 

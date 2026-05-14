@@ -7,7 +7,7 @@ const ParseToken = struct {
 };
 
 pub fn buildParamsJson(allocator: std.mem.Allocator, uri: []const u8, source: []const u8, index: *const symbols.Index) ![]u8 {
-	var out: std.ArrayListUnmanaged(u8) = .{};
+	var out: std.ArrayListUnmanaged(u8) = .empty;
 	errdefer out.deinit(allocator);
 	try out.appendSlice(allocator, "{\"uri\":\"");
 	try out.appendSlice(allocator, uri);
@@ -53,7 +53,7 @@ pub fn buildParamsJson(allocator: std.mem.Allocator, uri: []const u8, source: []
 	var last_instruction_line: usize = 0;
 	var last_instruction_len: usize = 0;
 	var last_was_terminator = false;
-	var ptr_locals: std.StringHashMapUnmanaged(void) = .{};
+	var ptr_locals: std.StringHashMapUnmanaged(void) = .empty;
 	defer ptr_locals.deinit(allocator);
 	var line_no: usize = 0;
 	var lines = std.mem.splitScalar(u8, source, '\n');

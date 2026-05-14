@@ -26,8 +26,8 @@ pub const Reference = struct {
 
 pub const Index = struct {
 	allocator: std.mem.Allocator,
-	symbols: std.ArrayListUnmanaged(Symbol) = .{},
-	references: std.ArrayListUnmanaged(Reference) = .{},
+	symbols: std.ArrayListUnmanaged(Symbol) = .empty,
+	references: std.ArrayListUnmanaged(Reference) = .empty,
 	source_filename: ?[]const u8 = null,
 	target_triple: ?[]const u8 = null,
 	target_datalayout: ?[]const u8 = null,
