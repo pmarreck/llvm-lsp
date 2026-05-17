@@ -17,6 +17,27 @@ if [[ "${1:-}" == "debug" ]]; then
   shift
 fi
 
+# Detect --test and route to a test runner (nix build doesn't accept --test).
+test_mode=false
+filtered_args=()
+for a in "$@"; do
+  if [[ "$a" == "--test" ]]; then
+    test_mode=true
+  else
+    filtered_args+=("$a")
+  fi
+done
+set -- "${filtered_args[@]+"${filtered_args[@]}"}"
+
+if $test_mode; then
+  if command -v nix >/dev/null 2>&1; then
+    run nix flake check "$@"
+  else
+    run zig build test "$@"
+  fi
+  exit 0
+fi
+
 if [[ "$optimize" != "ReleaseFast" ]]; then
   # Non-release builds use zig directly (local dev, no need for Nix reproducibility)
   run zig build "-Doptimize=$optimize" "$@"
