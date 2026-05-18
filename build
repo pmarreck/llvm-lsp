@@ -12,7 +12,7 @@ run() {
 }
 
 optimize="ReleaseFast"
-if [[ "${1:-}" == "debug" ]]; then
+if [[ "${1:-}" == "debug" || "${1:-}" == "--debug" ]]; then
   optimize="Debug"
   shift
 fi
