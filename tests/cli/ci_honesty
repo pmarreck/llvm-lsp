@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+source "$(dirname "$0")/../lib/capture.bash"
+
+# A Nix builder cannot recursively invoke Nix. The outer local test proves the
+# flake boundary; the sandboxed run covers the complete product suite.
+if [[ "${LLVM_LSP_IN_NIX_CHECK:-}" == "1" ]]; then
+	exit 0
+fi
+
+fail=0
+out=""
+err=""
+rc=0
+
+for entrypoint in build test; do
+	content="$(<"$entrypoint")"
+	if [[ "$content" == *"nix develop"* ]]; then
+		printf 'FAIL: %s must not run local work through nix develop\n' "$entrypoint" >&2
+		fail=1
+	fi
+done
+
+if (( fail != 0 )); then
+	exit "$fail"
+fi
+
+capture nix build -L --no-link .#checks.x86_64-linux.test
+if (( rc != 0 )); then
+	printf 'FAIL: checks.x86_64-linux.test must build successfully\n' >&2
+	fail=1
+fi
+
+capture env LLVM_LSP_CI_FAILURE_INJECTION=1 nix build --impure -L --no-link .#checks.x86_64-linux.test
+if (( rc == 0 )); then
+	printf 'FAIL: injected test-suite failure must fail the Nix CI check\n' >&2
+	fail=1
+fi
+
+if [[ "$out$err" != *"INTENTIONAL CI FAILURE INJECTION"* ]]; then
+	printf 'FAIL: Nix CI failure must originate in the complete test runner\n' >&2
+	fail=1
+fi
+
+exit "$fail"

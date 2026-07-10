@@ -3,13 +3,28 @@ set -uo pipefail
 
 status=0
 
+if [[ "${LLVM_LSP_CI_FAILURE_INJECTION:-}" == "1" ]]; then
+	printf 'INTENTIONAL CI FAILURE INJECTION\n' >&2
+	exit 97
+fi
+
+if [[ "${LLVM_LSP_IN_NIX_CHECK:-}" != "1" ]]; then
+	if ! ./build --test; then
+		status=1
+	fi
+	if ! bash tests/cli/ci_honesty; then
+		status=1
+	fi
+	exit "$status"
+fi
+
 if ! ./build --test; then
 	status=1
 fi
 
 if [[ -d tests/cli ]]; then
 	while IFS= read -r test_file; do
-		if ! nix develop -c bash "$test_file"; then
+		if ! bash "$test_file"; then
 			status=1
 		fi
 	done < <(find tests/cli -maxdepth 1 -type f -perm -u+x | sort)

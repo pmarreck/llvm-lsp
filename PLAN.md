@@ -3,6 +3,10 @@
 ## Current Goal
 - Continue toward full LLVM-IR parser coverage via strict TDD, led by failing behavior tests.
 
+## CI Hardening
+- [x] Replace the package-only false-green flake with a sandboxed `checks.<system>.test` that runs the complete `./test` suite, uses baseline CPU/static musl on Linux, and proves failure propagation with deterministic injection. (completed 2026-07-10 11:56 EDT)
+- Curiosity poke: keep the CI-honesty test outside recursive Nix builders while ensuring any new product test remains discoverable through the executable `tests/cli/` classifier.
+
 ## Work Items
 - [x] Audit repository and existing `SPEC.md` content for gaps. (completed 2026-02-14 14:19 EST)
 - [x] Rewrite `SPEC.md` into an actionable implementation spec for release `0.1.0`. (completed 2026-02-14 14:20 EST)

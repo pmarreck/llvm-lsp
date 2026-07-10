@@ -1,0 +1,6 @@
+# Dirtree: Stateful directory trees in the CLI for humans and LLMs. https://github.com/pmarreck/dirtree
+ver=1.2
+annotate=[
+	README.md = Project overview, local build/test entrypoints, and Mechatron Prime Nix check usage.
+	tests/cli/ci_honesty = Deterministic contract proving the sandboxed Nix check runs and propagates complete-suite failures.
+]

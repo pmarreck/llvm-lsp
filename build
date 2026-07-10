@@ -29,22 +29,30 @@ for a in "$@"; do
 done
 set -- "${filtered_args[@]+"${filtered_args[@]}"}"
 
+zig_args=("-Doptimize=$optimize" "-Dcpu=${LLVM_LSP_ZIG_CPU:-baseline}")
+if [[ -n "${LLVM_LSP_ZIG_TARGET:-}" ]]; then
+  zig_args+=("-Dtarget=$LLVM_LSP_ZIG_TARGET")
+fi
+
 if $test_mode; then
-  if command -v nix >/dev/null 2>&1; then
-    run nix flake check "$@"
+  if [[ "${LLVM_LSP_IN_NIX_CHECK:-}" == "1" ]]; then
+    run zig build test "${zig_args[@]}" "$@"
   else
-    run zig build test "$@"
+    current_system="$(nix eval --impure --raw --expr builtins.currentSystem)" || exit 1
+    run nix build -L --no-link ".#checks.${current_system}.test" "$@"
   fi
   exit 0
 fi
 
 if [[ "$optimize" != "ReleaseFast" ]]; then
   # Non-release builds use zig directly (local dev, no need for Nix reproducibility)
-  run zig build "-Doptimize=$optimize" "$@"
+  run zig build "${zig_args[@]}" "$@"
+elif [[ "${LLVM_LSP_IN_NIX_CHECK:-}" == "1" ]]; then
+  run zig build "${zig_args[@]}" "$@"
 elif command -v nix >/dev/null 2>&1; then
   run nix build "$@"
   mkdir -p zig-out/bin
   run install -m755 result/bin/* zig-out/bin/
 else
-  run zig build "-Doptimize=$optimize" "$@"
+  run zig build "${zig_args[@]}" "$@"
 fi
